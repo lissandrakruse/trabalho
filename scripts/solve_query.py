@@ -17,7 +17,7 @@ MIN_ASSOCIATION_CONFIDENCE = 1e-12
 MIN_LEARNED_RULE_SUPPORT = 0.01
 MIN_LEARNED_RULE_CONFIDENCE = 0.2
 MIN_LEARNED_RULE_LIFT = 1.05
-MAX_LEARNED_ASSOCIATION_RULES = 1
+MAX_LEARNED_ASSOCIATION_RULES = 3
 SOLVER_ENGINES = [
     {"id": "highs", "name": "SciPy HiGHS", "method": "highs"},
     {"id": "highs-ds", "name": "HiGHS Dual Simplex", "method": "highs-ds"},
