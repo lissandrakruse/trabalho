@@ -140,6 +140,22 @@ def validate_conditions(
     return cleaned
 
 
+def normalize_base_conditions(
+    base: list[dict[str, str]],
+    target: dict[str, str],
+) -> list[dict[str, str]]:
+    normalized = []
+    seen: set[tuple[str, str]] = set()
+    target_key = (target["attribute"], target["value"])
+    for condition in base:
+        key = (condition["attribute"], condition["value"])
+        if key == target_key or key in seen:
+            continue
+        seen.add(key)
+        normalized.append(condition)
+    return normalized
+
+
 def matches(row: dict[str, str], conditions: list[dict[str, str]]) -> bool:
     return all(row[condition["attribute"]] == condition["value"] for condition in conditions)
 
@@ -549,6 +565,7 @@ def compute_query(
     started_at = datetime.now(timezone.utc)
     started_perf = time.perf_counter()
     rows = data["rows"]
+    conditions = normalize_base_conditions(conditions, target)
     both = [*conditions, target]
     p_a = probability(rows, [target])
     p_b = probability(rows, conditions)

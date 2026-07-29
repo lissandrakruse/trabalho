@@ -147,6 +147,22 @@ def valid_conditions(conditions: list[dict[str, Any]], domains: dict[str, list[s
     return cleaned
 
 
+def normalize_base_conditions(
+    base: list[dict[str, str]],
+    target: dict[str, str],
+) -> list[dict[str, str]]:
+    normalized = []
+    seen: set[tuple[str, str]] = set()
+    target_key = (target["attribute"], target["value"])
+    for condition in base:
+        key = (condition["attribute"], condition["value"])
+        if key == target_key or key in seen:
+            continue
+        seen.add(key)
+        normalized.append(condition)
+    return normalized
+
+
 @lru_cache(maxsize=1)
 def load_dataset() -> dict[str, Any]:
     with DATASET_PATH.open("r", encoding="utf-8", newline="") as file:
@@ -1057,8 +1073,11 @@ def compute_query(
     started_at = datetime.now(timezone.utc)
     started_perf = time.perf_counter()
     data = load_dataset()
-    base = valid_conditions(payload.get("conditions", []), data["domains"])
     target = valid_conditions([payload.get("target", {})], data["domains"])[0]
+    base = normalize_base_conditions(
+        valid_conditions(payload.get("conditions", []), data["domains"]),
+        target,
+    )
 
     rows = data["rows"]
     both = [*base, target]
@@ -1305,8 +1324,11 @@ def full_linear_program():
     try:
         payload = request.get_json(force=True)
         data = load_dataset()
-        base = valid_conditions(payload.get("conditions", []), data["domains"])
         target = valid_conditions([payload.get("target", {})], data["domains"])[0]
+        base = normalize_base_conditions(
+            valid_conditions(payload.get("conditions", []), data["domains"]),
+            target,
+        )
         lp = solve_linear_interval(data["worlds"], data["rows"], target, base)
         GENERATED_REPORT_DIR.mkdir(parents=True, exist_ok=True)
         FULL_LINEAR_PROGRAM_PATH.write_text(

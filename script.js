@@ -132,12 +132,27 @@ function intervalText(value) {
 }
 
 function buildPayload() {
+  const target = {
+    attribute: targetAttribute.value,
+    value: targetValue.value,
+  };
+  const seen = new Set();
+  const conditions = [];
+  [...conditionList.querySelectorAll(".condition-row")].forEach((row) => {
+    const selects = row.querySelectorAll("select");
+    const condition = { attribute: selects[0].value, value: selects[1].value };
+    const key = `${condition.attribute}\u0000${condition.value}`;
+    const isTarget = condition.attribute === target.attribute && condition.value === target.value;
+    if (isTarget || seen.has(key)) {
+      row.remove();
+      return;
+    }
+    seen.add(key);
+    conditions.push(condition);
+  });
   return {
-    conditions: readConditions(),
-    target: {
-      attribute: targetAttribute.value,
-      value: targetValue.value,
-    },
+    conditions,
+    target,
   };
 }
 
