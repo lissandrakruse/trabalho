@@ -103,9 +103,13 @@
         <section class="panel">
           <div class="panel-head">
             <h2>Formula&ccedil;&atilde;o</h2>
-            <div class="tab-list" role="tablist" aria-label="Formula&ccedil;&atilde;o da consulta">
-              <button class="tab-button is-active" id="linearTab" type="button" role="tab" aria-selected="true" aria-controls="linearPanel">Programa Linear</button>
-              <button class="tab-button" id="mathTab" type="button" role="tab" aria-selected="false" aria-controls="mathPanel">Modelo Matem&aacute;tico</button>
+            <div class="formulation-actions">
+              <div class="tab-list" role="tablist" aria-label="Formula&ccedil;&atilde;o da consulta">
+                <button class="tab-button is-active" id="linearTab" type="button" role="tab" aria-selected="true" aria-controls="linearPanel">Programa Linear</button>
+                <button class="tab-button" id="mathTab" type="button" role="tab" aria-selected="false" aria-controls="mathPanel">Modelo Matem&aacute;tico</button>
+              </div>
+              <button class="secondary-action compact-action" id="generateFullLinearProgram" type="button">Gerar LP Completo</button>
+              <a class="download-link compact-action is-hidden" id="downloadFullLinearProgram" href="/reports/generated/programa_linear_completo.txt" target="_blank" rel="noopener">Baixar LP Completo</a>
             </div>
           </div>
           <div class="tab-panel is-active" id="linearPanel" role="tabpanel" aria-labelledby="linearTab">

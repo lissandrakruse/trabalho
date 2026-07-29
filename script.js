@@ -7,8 +7,10 @@ const targetValue = document.querySelector("#targetValue");
 const generateReportButton = document.querySelector("#generateReport");
 const compareSolverButton = document.querySelector("#compareSolver");
 const generateSolverReportButton = document.querySelector("#generateSolverReport");
+const generateFullLinearProgramButton = document.querySelector("#generateFullLinearProgram");
 const downloadReportLink = document.querySelector("#downloadReport");
 const downloadSolverReportLink = document.querySelector("#downloadSolverReport");
+const downloadFullLinearProgramLink = document.querySelector("#downloadFullLinearProgram");
 const supportValue = document.querySelector("#supportValue");
 const confidenceValue = document.querySelector("#confidenceValue");
 const liftValue = document.querySelector("#liftValue");
@@ -359,6 +361,30 @@ async function compareSolver() {
   }
 }
 
+async function generateFullLinearProgram() {
+  generateFullLinearProgramButton.disabled = true;
+  generateFullLinearProgramButton.textContent = "Gerando LP...";
+  downloadFullLinearProgramLink.classList.add("is-hidden");
+
+  try {
+    const response = await fetch("/api/linear-program/full", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(buildPayload()),
+    });
+    const result = await response.json();
+    if (!response.ok || !result.ok) throw new Error(result.error || "Erro ao gerar LP completo.");
+    downloadFullLinearProgramLink.href = `${result.fileUrl}?t=${Date.now()}`;
+    downloadFullLinearProgramLink.classList.remove("is-hidden");
+    linearProgram.textContent = `${linearProgram.textContent}\n\nArquivo completo gerado: ${result.fileUrl}`;
+  } catch (error) {
+    linearProgram.textContent = `${linearProgram.textContent}\n\nErro ao gerar LP completo: ${error.message}`;
+  } finally {
+    generateFullLinearProgramButton.disabled = false;
+    generateFullLinearProgramButton.textContent = "Gerar LP Completo";
+  }
+}
+
 async function boot() {
   const response = await fetch("/api/metadata");
   if (!response.ok) throw new Error("API Python indisponivel.");
@@ -377,6 +403,7 @@ async function boot() {
   generateReportButton.addEventListener("click", generateReport);
   compareSolverButton.addEventListener("click", compareSolver);
   generateSolverReportButton.addEventListener("click", generateSolverReport);
+  generateFullLinearProgramButton.addEventListener("click", generateFullLinearProgram);
   tabButtons.forEach((button) => {
     button.addEventListener("click", () => setActiveTab(button));
   });

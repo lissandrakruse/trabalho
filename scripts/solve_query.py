@@ -149,6 +149,10 @@ def world_mask(worlds: list[dict[str, Any]], conditions: list[dict[str, str]]) -
     return [1.0 if matches(world["values"], conditions) else 0.0 for world in worlds]
 
 
+def add_vectors(left: list[float], right: list[float], right_scale: float = 1.0) -> list[float]:
+    return [left_item + right_scale * right_item for left_item, right_item in zip(left, right)]
+
+
 def rounded_interval(value: float, width: float = 0.001) -> tuple[float, float]:
     rounded = round(value, 3)
     return max(0.0, rounded - width), min(1.0, rounded + width)
@@ -173,6 +177,74 @@ def event_key(conditions: list[dict[str, str]]) -> str:
     if not conditions:
         return "verdadeiro"
     return ", ".join(f"{item['attribute']}={item['value']}" for item in conditions)
+
+
+def build_linear_constraints(
+    data: dict[str, Any],
+    target: dict[str, str],
+    base: list[dict[str, str]],
+) -> tuple[list[list[float]], list[float], dict[str, int]]:
+    rows = data["rows"]
+    worlds = data["worlds"]
+    a_ub: list[list[float]] = []
+    b_ub: list[float] = []
+    summary = {
+        "marginal": 0,
+        "pairwiseJoint": 0,
+        "associationRule": 0,
+        "selected": 0,
+    }
+
+    def add_interval(kind: str, conditions: list[dict[str, str]], value: float) -> None:
+        lower, upper = rounded_interval(value)
+        mask = world_mask(worlds, conditions)
+        a_ub.append(mask)
+        b_ub.append(upper)
+        a_ub.append([-item for item in mask])
+        b_ub.append(-lower)
+        summary[kind] += 1
+
+    def add_confidence_rule(
+        kind: str,
+        antecedent: list[dict[str, str]],
+        consequent: list[dict[str, str]],
+    ) -> None:
+        antecedent_probability = probability(rows, antecedent)
+        if antecedent_probability <= 0:
+            return
+        both = [*antecedent, *consequent]
+        confidence = probability(rows, both) / antecedent_probability
+        lower, upper = rounded_interval(confidence)
+        antecedent_mask = world_mask(worlds, antecedent)
+        both_mask = world_mask(worlds, both)
+        a_ub.append(add_vectors(both_mask, antecedent_mask, -upper))
+        b_ub.append(0.0)
+        a_ub.append(add_vectors([-item for item in both_mask], antecedent_mask, lower))
+        b_ub.append(0.0)
+        summary[kind] += 1
+
+    for attribute in data["attributes"]:
+        for value in data["domains"][attribute]:
+            conditions = [{"attribute": attribute, "value": value}]
+            add_interval("marginal", conditions, probability(rows, conditions))
+
+    for index, left_attribute in enumerate(data["attributes"]):
+        for right_attribute in data["attributes"][index + 1 :]:
+            for left_value in data["domains"][left_attribute]:
+                for right_value in data["domains"][right_attribute]:
+                    conditions = [
+                        {"attribute": left_attribute, "value": left_value},
+                        {"attribute": right_attribute, "value": right_value},
+                    ]
+                    add_interval("pairwiseJoint", conditions, probability(rows, conditions))
+
+    both = [*base, target]
+    add_interval("selected", [target], probability(rows, [target]))
+    add_interval("selected", base, probability(rows, base))
+    add_interval("selected", both, probability(rows, both))
+    add_confidence_rule("associationRule", base, [target])
+
+    return a_ub, b_ub, summary
 
 
 def solve_linear_interval(
@@ -202,27 +274,9 @@ def solve_linear_interval(
         return {"ok": False, "error": f"scipy indisponivel: {error}"}
 
     n = len(worlds)
-    a_ub: list[list[float]] = []
-    b_ub: list[float] = []
-
-    def add_interval(mask: list[float], value: float) -> None:
-        lower, upper = rounded_interval(value)
-        a_ub.append(mask)
-        b_ub.append(upper)
-        a_ub.append([-item for item in mask])
-        b_ub.append(-lower)
-
-    for attribute in data["attributes"]:
-        for value in data["domains"][attribute]:
-            add_interval(
-                world_mask(worlds, [{"attribute": attribute, "value": value}]),
-                probability(rows, [{"attribute": attribute, "value": value}]),
-            )
+    a_ub, b_ub, summary = build_linear_constraints(data, target, base)
 
     both = [*base, target]
-    add_interval(world_mask(worlds, [target]), probability(rows, [target]))
-    add_interval(world_mask(worlds, base), probability(rows, base))
-    add_interval(world_mask(worlds, both), probability(rows, both))
 
     denominator_mask = world_mask(worlds, base)
     numerator_mask = world_mask(worlds, both)
@@ -262,6 +316,8 @@ def solve_linear_interval(
         "upper": clean_probability(float(-upper_result.fun)),
         "variables": n,
         "constraints": len(transformed_a_ub) + len(transformed_a_eq),
+        "baseConstraints": len(a_ub),
+        "constraintSummary": summary,
         "solver": "scipy.optimize.linprog highs",
     }
 

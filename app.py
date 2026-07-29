@@ -17,6 +17,7 @@ DATASET_PATH = ROOT / "data" / "Crop_recommendation.csv"
 GENERATED_REPORT_DIR = ROOT / "reports" / "generated"
 QUERY_REPORT_PATH = GENERATED_REPORT_DIR / "relatorio_consulta_atual.pdf"
 SOLVER_COMPARISON_REPORT_PATH = GENERATED_REPORT_DIR / "relatorio_comparacao_solver.pdf"
+FULL_LINEAR_PROGRAM_PATH = GENERATED_REPORT_DIR / "programa_linear_completo.txt"
 KNOWN_LABELS = {
     "N": "Nitrogenio",
     "P": "Fosforo",
@@ -184,6 +185,108 @@ def world_mask(worlds: list[dict[str, Any]], conditions: list[dict[str, str]]) -
     return [1.0 if matches(world["values"], conditions) else 0.0 for world in worlds]
 
 
+def mask_expression(conditions: list[dict[str, str]]) -> str:
+    return f"soma(x_w onde {event_key(conditions)})"
+
+
+def add_vectors(left: list[float], right: list[float], right_scale: float = 1.0) -> list[float]:
+    return [left_item + right_scale * right_item for left_item, right_item in zip(left, right)]
+
+
+def build_linear_constraints(
+    worlds: list[dict[str, Any]],
+    rows: list[dict[str, str]],
+    target: dict[str, str],
+    base: list[dict[str, str]],
+) -> tuple[list[list[float]], list[float], list[dict[str, Any]]]:
+    a_ub: list[list[float]] = []
+    b_ub: list[float] = []
+    records: list[dict[str, Any]] = []
+    attributes = list(rows[0].keys())
+    domains = {
+        attribute: sorted({row[attribute] for row in rows})
+        for attribute in attributes
+    }
+
+    def add_interval(kind: str, conditions: list[dict[str, str]], value: float) -> None:
+        mask = world_mask(worlds, conditions)
+        lower, upper = rounded_interval(value)
+        a_ub.append(mask)
+        b_ub.append(upper)
+        a_ub.append([-item for item in mask])
+        b_ub.append(-lower)
+        records.append(
+            {
+                "kind": kind,
+                "conditions": conditions,
+                "lower": lower,
+                "upper": upper,
+                "value": value,
+                "expression": mask_expression(conditions),
+            }
+        )
+
+    def add_confidence_rule(
+        kind: str,
+        antecedent: list[dict[str, str]],
+        consequent: list[dict[str, str]],
+    ) -> None:
+        antecedent_probability = probability(rows, antecedent)
+        if antecedent_probability <= 0:
+            return
+        both = [*antecedent, *consequent]
+        confidence = probability(rows, both) / antecedent_probability
+        lower, upper = rounded_interval(confidence)
+        antecedent_mask = world_mask(worlds, antecedent)
+        both_mask = world_mask(worlds, both)
+
+        # P(A e B) / P(B) <= upper  ->  P(A e B) - upper P(B) <= 0
+        a_ub.append(add_vectors(both_mask, antecedent_mask, -upper))
+        b_ub.append(0.0)
+
+        # P(A e B) / P(B) >= lower  -> -P(A e B) + lower P(B) <= 0
+        a_ub.append(add_vectors([-item for item in both_mask], antecedent_mask, lower))
+        b_ub.append(0.0)
+
+        records.append(
+            {
+                "kind": kind,
+                "antecedent": antecedent,
+                "consequent": consequent,
+                "lower": lower,
+                "upper": upper,
+                "value": confidence,
+                "expression": (
+                    f"{lower:.3f} <= {mask_expression(both)} / "
+                    f"{mask_expression(antecedent)} <= {upper:.3f}"
+                ),
+            }
+        )
+
+    for attribute in attributes:
+        for value in domains[attribute]:
+            conditions = [{"attribute": attribute, "value": value}]
+            add_interval("marginal", conditions, probability(rows, conditions))
+
+    for index, left_attribute in enumerate(attributes):
+        for right_attribute in attributes[index + 1 :]:
+            for left_value in domains[left_attribute]:
+                for right_value in domains[right_attribute]:
+                    conditions = [
+                        {"attribute": left_attribute, "value": left_value},
+                        {"attribute": right_attribute, "value": right_value},
+                    ]
+                    add_interval("pairwise_joint", conditions, probability(rows, conditions))
+
+    both = [*base, target]
+    add_interval("selected_target", [target], probability(rows, [target]))
+    add_interval("selected_base", base, probability(rows, base))
+    add_interval("selected_joint", both, probability(rows, both))
+    add_confidence_rule("selected_association_rule", base, [target])
+
+    return a_ub, b_ub, records
+
+
 def solve_linear_interval(
     worlds: list[dict[str, Any]],
     rows: list[dict[str, str]],
@@ -210,28 +313,9 @@ def solve_linear_interval(
         return {"ok": False, "error": f"scipy indisponivel: {error}"}
 
     n = len(worlds)
-    a_ub: list[list[float]] = []
-    b_ub: list[float] = []
-
-    def add_interval(mask: list[float], value: float) -> None:
-        lower, upper = rounded_interval(value)
-        a_ub.append(mask)
-        b_ub.append(upper)
-        a_ub.append([-item for item in mask])
-        b_ub.append(-lower)
-
-    # Marginais de todos os valores observados: conhecimento probabilistico da base.
-    attributes = list(rows[0].keys())
-    for attribute in attributes:
-        for value in sorted({row[attribute] for row in rows}):
-            conditions = [{"attribute": attribute, "value": value}]
-            add_interval(world_mask(worlds, conditions), probability(rows, conditions))
+    a_ub, b_ub, records = build_linear_constraints(worlds, rows, target, base)
 
     both = [*base, target]
-    add_interval(world_mask(worlds, [target]), probability(rows, [target]))
-    add_interval(world_mask(worlds, base), probability(rows, base))
-    add_interval(world_mask(worlds, both), probability(rows, both))
-
     denominator_mask = world_mask(worlds, base)
     numerator_mask = world_mask(worlds, both)
 
@@ -277,6 +361,13 @@ def solve_linear_interval(
         "upper": upper_lo,
         "variables": n,
         "constraints": len(transformed_a_ub) + len(transformed_a_eq),
+        "baseConstraints": len(a_ub),
+        "constraintSummary": {
+            "marginal": sum(1 for item in records if item["kind"] == "marginal"),
+            "pairwiseJoint": sum(1 for item in records if item["kind"] == "pairwise_joint"),
+            "associationRule": sum(1 for item in records if "association_rule" in item["kind"]),
+            "selected": sum(1 for item in records if item["kind"].startswith("selected")),
+        },
         "solver": "scipy.optimize.linprog highs",
     }
 
@@ -301,10 +392,11 @@ def linear_program_text(
         "Restricao de normalizacao:",
         "  soma(x_w) = 1",
         "",
-        "Restricoes extraidas da base:",
+        "Resumo das restricoes extraidas da base:",
         f"  {i_a[0]:.3f} <= P(A) = soma(x_w onde {event_key([target])}) <= {i_a[1]:.3f}",
         f"  {i_b[0]:.3f} <= P(B) = {denominator} <= {i_b[1]:.3f}",
         f"  {i_ab[0]:.3f} <= P(A e B) = {numerator} <= {i_ab[1]:.3f}",
+        "  Observacao: a lista completa inclui marginais, conjuntas por pares e regras de associacao.",
         "",
         "Consulta:",
         "  P(A | B) = P(A e B) / P(B)",
@@ -323,6 +415,7 @@ def linear_program_text(
                 f"Solver: {lp['solver']}",
                 f"Variaveis: {lp['variables']}",
                 f"Restricoes: {lp['constraints']}",
+                f"Resumo: {lp.get('constraintSummary', {})}",
                 f"Intervalo retornado: {fmt_probability(lp['lower'])} <= P(A | B) <= {fmt_probability(lp['upper'])}",
             ]
         )
@@ -337,6 +430,78 @@ def linear_program_text(
         )
     else:
         lines.extend(["", f"Solver indisponivel: {lp.get('error', 'erro desconhecido')}"])
+    return "\n".join(lines)
+
+
+def full_linear_program_text(
+    worlds: list[dict[str, Any]],
+    rows: list[dict[str, str]],
+    target: dict[str, str],
+    base: list[dict[str, str]],
+    lp: dict[str, Any],
+) -> str:
+    _, _, records = build_linear_constraints(worlds, rows, target, base)
+    both = [*base, target]
+    lines = [
+        "PROGRAMA LINEAR COMPLETO DA CONSULTA",
+        "",
+        f"Consulta: P({event_key([target])} | {event_key(base)})",
+        f"Mundos possiveis observados: {len(worlds)}",
+        "",
+        "Variaveis originais:",
+        "  x_w >= 0 para cada mundo possivel w",
+        "  soma_w x_w = 1",
+        "",
+        "Objetivo fracionario:",
+        f"  P(A | B) = {mask_expression(both)} / {mask_expression(base)}",
+        "",
+        "Transformacao de Charnes-Cooper usada pelo solver:",
+        "  x_w = y_w / t",
+        f"  {mask_expression(base).replace('x_w', 'y_w')} = 1",
+        "  soma_w y_w - t = 0",
+        "  cada restricao a.x <= b vira a.y - b.t <= 0",
+        "",
+        "Objetivos resolvidos:",
+        f"  minimizar {mask_expression(both).replace('x_w', 'y_w')}",
+        f"  maximizar {mask_expression(both).replace('x_w', 'y_w')}",
+        "",
+        "Resumo quantitativo:",
+        f"  Variaveis do solver apos Charnes-Cooper: {lp.get('variables', len(worlds)) + 1}",
+        f"  Restricoes lineares no solver: {lp.get('constraints', '-')}",
+        f"  Restricoes intervalares/de associacao antes da transformacao: {lp.get('baseConstraints', '-')}",
+        f"  Agrupamento: {lp.get('constraintSummary', {})}",
+        "",
+        "Observacao sobre P(A e B):",
+        "  A soma sempre lista todas as condicoes simultaneas que definem o evento.",
+        "  Se B possui duas afirmacoes e A possui uma, P(A e B) aparece com tres condicoes porque representa a intersecao completa.",
+        "  Alem da consulta selecionada, este arquivo inclui restricoes conjuntas para cada par de atributos/valores da base.",
+        "",
+        "RESTRICOES COMPLETAS",
+        "",
+    ]
+
+    grouped_titles = {
+        "marginal": "1. Probabilidades marginais",
+        "pairwise_joint": "2. Probabilidades conjuntas por pares de valores",
+        "association_rule": "3. Regras de associacao por pares: confianca P(consequente | antecedente)",
+        "selected_target": "4. Evento alvo A da consulta",
+        "selected_base": "5. Evento condicionante B da consulta",
+        "selected_joint": "6. Evento conjunto A e B da consulta",
+        "selected_association_rule": "7. Regra de associacao selecionada B -> A",
+    }
+    for kind, title in grouped_titles.items():
+        selected_records = [item for item in records if item["kind"] == kind]
+        lines.append(title)
+        lines.append(f"  Total de entradas: {len(selected_records)}")
+        for index, item in enumerate(selected_records, start=1):
+            if "conditions" in item:
+                lines.append(
+                    f"  {index}. {item['lower']:.3f} <= {item['expression']} <= {item['upper']:.3f}"
+                )
+            else:
+                lines.append(f"  {index}. {item['expression']}")
+        lines.append("")
+
     return "\n".join(lines)
 
 
@@ -639,6 +804,33 @@ def query():
     except ValueError as error:
         return jsonify({"ok": False, "error": str(error)}), 400
     return jsonify(result)
+
+
+@app.post("/api/linear-program/full")
+def full_linear_program():
+    try:
+        payload = request.get_json(force=True)
+        data = load_dataset()
+        base = valid_conditions(payload.get("conditions", []), data["domains"])
+        target = valid_conditions([payload.get("target", {})], data["domains"])[0]
+        lp = solve_linear_interval(data["worlds"], data["rows"], target, base)
+        GENERATED_REPORT_DIR.mkdir(parents=True, exist_ok=True)
+        FULL_LINEAR_PROGRAM_PATH.write_text(
+            full_linear_program_text(data["worlds"], data["rows"], target, base, lp),
+            encoding="utf-8",
+        )
+    except ValueError as error:
+        return jsonify({"ok": False, "error": str(error)}), 400
+    except Exception as error:
+        return jsonify({"ok": False, "error": f"Erro ao gerar programa linear completo: {error}"}), 500
+
+    return jsonify(
+        {
+            "ok": True,
+            "fileUrl": "/reports/generated/programa_linear_completo.txt",
+            "message": "Programa linear completo gerado com sucesso.",
+        }
+    )
 
 
 @app.post("/api/solver/compare")
