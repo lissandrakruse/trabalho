@@ -14,6 +14,10 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DATASET = ROOT / "data" / "Crop_recommendation.csv"
 MIN_ASSOCIATION_SUPPORT = 1e-12
 MIN_ASSOCIATION_CONFIDENCE = 1e-12
+MIN_LEARNED_RULE_SUPPORT = 0.01
+MIN_LEARNED_RULE_CONFIDENCE = 0.2
+MIN_LEARNED_RULE_LIFT = 1.05
+MAX_LEARNED_ASSOCIATION_RULES = 1
 SOLVER_ENGINES = [
     {"id": "highs", "name": "SciPy HiGHS", "method": "highs"},
     {"id": "highs-ds", "name": "HiGHS Dual Simplex", "method": "highs-ds"},
@@ -199,6 +203,65 @@ def association_rule_is_valid(
     return p_both > MIN_ASSOCIATION_SUPPORT and confidence > MIN_ASSOCIATION_CONFIDENCE
 
 
+def condition_signature(conditions: list[dict[str, str]]) -> tuple[tuple[str, str], ...]:
+    return tuple(sorted((item["attribute"], item["value"]) for item in conditions))
+
+
+def mine_association_rules(
+    rows: list[dict[str, str]],
+    domains: dict[str, list[str]],
+    max_rules: int = MAX_LEARNED_ASSOCIATION_RULES,
+) -> list[dict[str, Any]]:
+    attributes = list(domains.keys())
+    single_conditions = [
+        [{"attribute": attribute, "value": value}]
+        for attribute in attributes
+        for value in domains[attribute]
+    ]
+    antecedents = [*single_conditions]
+
+    rules: list[dict[str, Any]] = []
+    seen: set[tuple[tuple[tuple[str, str], ...], tuple[tuple[str, str], ...]]] = set()
+    for antecedent in antecedents:
+        antecedent_attributes = {item["attribute"] for item in antecedent}
+        p_antecedent = probability(rows, antecedent)
+        if p_antecedent <= 0:
+            continue
+        for consequent_attribute in attributes:
+            if consequent_attribute in antecedent_attributes:
+                continue
+            for consequent_value in domains[consequent_attribute]:
+                consequent = [{"attribute": consequent_attribute, "value": consequent_value}]
+                signature = (condition_signature(antecedent), condition_signature(consequent))
+                if signature in seen:
+                    continue
+                seen.add(signature)
+                p_consequent = probability(rows, consequent)
+                both = [*antecedent, *consequent]
+                support = probability(rows, both)
+                confidence = support / p_antecedent if p_antecedent > 0 else None
+                lift = confidence / p_consequent if confidence is not None and p_consequent > 0 else None
+                if (
+                    support >= MIN_LEARNED_RULE_SUPPORT
+                    and confidence is not None
+                    and confidence >= MIN_LEARNED_RULE_CONFIDENCE
+                    and lift is not None
+                    and lift >= MIN_LEARNED_RULE_LIFT
+                ):
+                    rules.append(
+                        {
+                            "antecedent": antecedent,
+                            "consequent": consequent,
+                            "support": support,
+                            "confidence": confidence,
+                            "lift": lift,
+                        }
+                    )
+
+    rules.sort(key=lambda item: (item["lift"], item["confidence"], item["support"]), reverse=True)
+    return rules[:max_rules]
+
+
 def build_linear_constraints(
     data: dict[str, Any],
     target: dict[str, str],
@@ -211,6 +274,8 @@ def build_linear_constraints(
     summary = {
         "marginal": 0,
         "pairwiseJoint": 0,
+        "learnedAssociationRule": 0,
+        "selectedAssociationRule": 0,
         "associationRule": 0,
         "selected": 0,
     }
@@ -258,11 +323,17 @@ def build_linear_constraints(
                     ]
                     add_interval("pairwiseJoint", conditions, probability(rows, conditions))
 
+    for rule in mine_association_rules(rows, data["domains"]):
+        add_confidence_rule("learnedAssociationRule", rule["antecedent"], rule["consequent"])
+
     both = [*base, target]
     add_interval("selected", [target], probability(rows, [target]))
     add_interval("selected", base, probability(rows, base))
     add_interval("selected", both, probability(rows, both))
+    before_selected_rule = summary["associationRule"]
     add_confidence_rule("associationRule", base, [target])
+    summary["selectedAssociationRule"] = summary["associationRule"] - before_selected_rule
+    summary["associationRule"] = summary["learnedAssociationRule"] + summary["selectedAssociationRule"]
 
     return a_ub, b_ub, summary
 

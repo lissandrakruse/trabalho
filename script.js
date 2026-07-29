@@ -289,11 +289,19 @@ async function runQuery() {
     }
 
     const ruleLabel = result.support > 0 && result.confidence > 0 ? "Regra candidata" : "Consulta sem regra aprendida";
+    const learnedRuleCount = result.learnedAssociationRules?.length || 0;
+    const topLearnedRule = result.learnedAssociationRules?.[0];
+    const learnedRulePreview = topLearnedRule
+      ? `Foi incorporada a top regra aprendida do dataset ao programa linear, independentemente da consulta atual: ${eventLabel(topLearnedRule.antecedent)} -> ${eventLabel(topLearnedRule.consequent)}; suporte=${fmt(topLearnedRule.support)}, confianca=${fmt(topLearnedRule.confidence)}, lift=${fmt(topLearnedRule.lift)}.`
+      : learnedRuleCount
+      ? `Foram incorporadas ${learnedRuleCount} regras de associação aprendidas do dataset ao programa linear, independentemente da consulta atual.`
+      : "Nenhuma regra de associação aprendida atingiu os limiares de suporte, confiança e lift para entrar no programa linear.";
     probabilityText.innerHTML = [
       `<div><strong>${ruleLabel}:</strong> se ${eventLabel(result.conditions)}, então ${eventLabel([result.target])}.</div>`,
       `<div><strong>Suporte:</strong> ${fmt(result.support)} representa P(A e B).</div>`,
       `<div><strong>Confiança/Precisão:</strong> ${fmt(result.confidence)} representa P(A | B).</div>`,
       `<div><strong>Lift:</strong> ${fmt(result.lift)} compara a regra com a probabilidade marginal de A.</div>`,
+      `<div><strong>Regras aprendidas no PL:</strong> ${learnedRulePreview}</div>`,
       `<div><strong>Marginais:</strong> P(A)=${fmt(result.pA)} e P(B)=${fmt(result.pB)}.</div>`,
       linearInterval,
       `<div><strong>Conclusão:</strong> ${result.conclusion}</div>`,

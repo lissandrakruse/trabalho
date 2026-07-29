@@ -20,6 +20,10 @@ SOLVER_COMPARISON_REPORT_PATH = GENERATED_REPORT_DIR / "relatorio_comparacao_sol
 FULL_LINEAR_PROGRAM_PATH = GENERATED_REPORT_DIR / "programa_linear_completo.txt"
 MIN_ASSOCIATION_SUPPORT = 1e-12
 MIN_ASSOCIATION_CONFIDENCE = 1e-12
+MIN_LEARNED_RULE_SUPPORT = 0.01
+MIN_LEARNED_RULE_CONFIDENCE = 0.2
+MIN_LEARNED_RULE_LIFT = 1.05
+MAX_LEARNED_ASSOCIATION_RULES = 1
 SOLVER_ENGINES = [
     {
         "id": "highs",
@@ -306,6 +310,65 @@ def association_rule_status(
     }
 
 
+def condition_signature(conditions: list[dict[str, str]]) -> tuple[tuple[str, str], ...]:
+    return tuple(sorted((item["attribute"], item["value"]) for item in conditions))
+
+
+def mine_association_rules(
+    rows: list[dict[str, str]],
+    domains: dict[str, list[str]],
+    max_rules: int = MAX_LEARNED_ASSOCIATION_RULES,
+) -> list[dict[str, Any]]:
+    attributes = list(domains.keys())
+    single_conditions = [
+        [{"attribute": attribute, "value": value}]
+        for attribute in attributes
+        for value in domains[attribute]
+    ]
+    antecedents = [*single_conditions]
+
+    rules: list[dict[str, Any]] = []
+    seen: set[tuple[tuple[tuple[str, str], ...], tuple[tuple[str, str], ...]]] = set()
+    for antecedent in antecedents:
+        antecedent_attributes = {item["attribute"] for item in antecedent}
+        p_antecedent = probability(rows, antecedent)
+        if p_antecedent <= 0:
+            continue
+        for consequent_attribute in attributes:
+            if consequent_attribute in antecedent_attributes:
+                continue
+            for consequent_value in domains[consequent_attribute]:
+                consequent = [{"attribute": consequent_attribute, "value": consequent_value}]
+                signature = (condition_signature(antecedent), condition_signature(consequent))
+                if signature in seen:
+                    continue
+                seen.add(signature)
+                p_consequent = probability(rows, consequent)
+                both = [*antecedent, *consequent]
+                support = probability(rows, both)
+                confidence = support / p_antecedent if p_antecedent > 0 else None
+                lift = confidence / p_consequent if confidence is not None and p_consequent > 0 else None
+                if (
+                    support >= MIN_LEARNED_RULE_SUPPORT
+                    and confidence is not None
+                    and confidence >= MIN_LEARNED_RULE_CONFIDENCE
+                    and lift is not None
+                    and lift >= MIN_LEARNED_RULE_LIFT
+                ):
+                    rules.append(
+                        {
+                            "antecedent": antecedent,
+                            "consequent": consequent,
+                            "support": support,
+                            "confidence": confidence,
+                            "lift": lift,
+                        }
+                    )
+
+    rules.sort(key=lambda item: (item["lift"], item["confidence"], item["support"]), reverse=True)
+    return rules[:max_rules]
+
+
 def add_vectors(left: list[float], right: list[float], right_scale: float = 1.0) -> list[float]:
     return [left_item + right_scale * right_item for left_item, right_item in zip(left, right)]
 
@@ -396,6 +459,14 @@ def build_linear_constraints(
                     ]
                     add_interval("pairwise_joint", conditions, probability(rows, conditions))
 
+    learned_rules = mine_association_rules(rows, domains)
+    for rule in learned_rules:
+        add_confidence_rule(
+            "learned_association_rule",
+            rule["antecedent"],
+            rule["consequent"],
+        )
+
     both = [*base, target]
     add_interval("selected_target", [target], probability(rows, [target]))
     add_interval("selected_base", base, probability(rows, base))
@@ -485,6 +556,8 @@ def solve_linear_interval(
         "constraintSummary": {
             "marginal": sum(1 for item in records if item["kind"] == "marginal"),
             "pairwiseJoint": sum(1 for item in records if item["kind"] == "pairwise_joint"),
+            "learnedAssociationRule": sum(1 for item in records if item["kind"] == "learned_association_rule"),
+            "selectedAssociationRule": sum(1 for item in records if item["kind"] == "selected_association_rule"),
             "associationRule": sum(1 for item in records if "association_rule" in item["kind"]),
             "selected": sum(1 for item in records if item["kind"].startswith("selected")),
         },
@@ -625,6 +698,31 @@ def full_linear_program_text(
         candidate_joint = [*base, *candidate]
         lines.append(f"  P({event_key(candidate_joint)}) = {probability(rows, candidate_joint):.3f}")
 
+    learned_rules = mine_association_rules(rows, domains)
+    lines.extend(
+        [
+            "",
+            "REGRAS DE ASSOCIACAO APRENDIDAS DO DATASET",
+            "",
+            (
+                "Estas regras nao dependem da consulta escolhida pelo usuario. "
+                "Elas sao mineradas da base categorizada e incorporadas ao programa linear "
+                "quando possuem suporte, confianca e lift positivos acima dos limiares do projeto."
+            ),
+            (
+                f"Limiar usado: suporte >= {MIN_LEARNED_RULE_SUPPORT:.3f}, "
+                f"confianca >= {MIN_LEARNED_RULE_CONFIDENCE:.3f}, "
+                f"lift >= {MIN_LEARNED_RULE_LIFT:.3f}."
+            ),
+            f"Total de regras aprendidas incorporadas: {len(learned_rules)}",
+        ]
+    )
+    for index, rule in enumerate(learned_rules, start=1):
+        lines.append(
+            f"  {index}. {event_key(rule['antecedent'])} -> {event_key(rule['consequent'])} | "
+            f"suporte={rule['support']:.3f}, confianca={rule['confidence']:.3f}, lift={rule['lift']:.3f}"
+        )
+
     lines.extend(
         [
             "",
@@ -669,7 +767,7 @@ def full_linear_program_text(
     grouped_titles = {
         "marginal": "1. Probabilidades marginais",
         "pairwise_joint": "2. Probabilidades conjuntas por pares de valores",
-        "association_rule": "3. Regras de associacao aceitas como restricao ativa",
+        "learned_association_rule": "3. Regras de associacao aprendidas do dataset e aceitas como restricao ativa",
         "selected_target": "4. Evento alvo A da consulta",
         "selected_base": "5. Evento condicionante B da consulta",
         "selected_joint": "6. Evento conjunto A e B da consulta",
@@ -851,6 +949,7 @@ def compute_query(
     count_both = probability_count(rows, both)
     count_base = probability_count(rows, base)
     lp = solve_linear_interval(data["worlds"], rows, target, base, solver_method, solver_name)
+    learned_rules = mine_association_rules(rows, data["domains"])
     classification = classification_metrics(count_a, count_base, count_both, data["total"])
     finished_at = datetime.now(timezone.utc)
     duration_seconds = time.perf_counter() - started_perf
@@ -876,6 +975,16 @@ def compute_query(
         "countA": count_a,
         "total": data["total"],
         "linear": lp,
+        "learnedAssociationRules": [
+            {
+                "antecedent": rule["antecedent"],
+                "consequent": rule["consequent"],
+                "support": rule["support"],
+                "confidence": rule["confidence"],
+                "lift": rule["lift"],
+            }
+            for rule in learned_rules
+        ],
         "classification": classification,
         "linearProgramSummary": linear_program_text(target, base, p_a, p_b, p_ab, lp),
         "linearProgram": full_linear_program_text(data["worlds"], rows, target, base, lp),
