@@ -70,6 +70,13 @@
       }
     }
   },
+  "processamento": {
+    "inicio": "2026-07-29T02:03:48.055369+00:00",
+    "fim": "2026-07-29T02:03:53.904420+00:00",
+    "duracao_segundos": 5.849108799942769,
+    "duracao_milissegundos": 5849.109,
+    "observacao": "Tempo medido para carregar/preparar dados, calcular probabilidades e resolver o programa linear do exemplo do relatorio."
+  },
   "probabilidades": {
     "pA": 0.045454545454545456,
     "pB": 0.09909090909090909,

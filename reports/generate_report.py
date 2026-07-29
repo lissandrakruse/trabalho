@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import sys
 import json
+import time
 from pathlib import Path
+from datetime import datetime, timezone
 
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
@@ -156,6 +158,8 @@ def page_style(canvas, doc) -> None:
 
 
 def build_report() -> None:
+    processing_started_at = datetime.now(timezone.utc)
+    processing_started_perf = time.perf_counter()
     data = load_dataset()
     rows = data["rows"]
     target = {"attribute": "label", "value": "rice"}
@@ -171,6 +175,8 @@ def build_report() -> None:
     confidence = p_ab / p_b if p_b > 0 else None
     lift = confidence / p_a if confidence is not None and p_a > 0 else None
     lp = solve_linear_interval(data["worlds"], rows, target, conditions)
+    processing_finished_at = datetime.now(timezone.utc)
+    processing_duration_seconds = time.perf_counter() - processing_started_perf
     lp_text = linear_program_text(target, conditions, p_a, p_b, p_ab, lp)
     lp_lower = lp.get("lower") if lp.get("ok") else None
     lp_upper = lp.get("upper") if lp.get("ok") else None
@@ -192,6 +198,13 @@ def build_report() -> None:
                     "atributos_categoricos_originais": data["categoricalAttributes"],
                     "mundos_observados": len(data["worlds"]),
                     "limiares_discretizacao": data["thresholds"],
+                },
+                "processamento": {
+                    "inicio": processing_started_at.isoformat(),
+                    "fim": processing_finished_at.isoformat(),
+                    "duracao_segundos": processing_duration_seconds,
+                    "duracao_milissegundos": round(processing_duration_seconds * 1000, 3),
+                    "observacao": "Tempo medido para carregar/preparar dados, calcular probabilidades e resolver o programa linear do exemplo do relatorio.",
                 },
                 "probabilidades": {
                     "pA": p_a,
@@ -398,7 +411,21 @@ def build_report() -> None:
     )
     story.append(metadata_table)
 
-    add_heading(story, "3. Algoritmos matematicos usados", h2)
+    add_heading(story, "3. Tempo de processamento", h2)
+    timing_table = styled_table(
+        [
+            ["Campo", "Valor"],
+            ["Inicio", processing_started_at.isoformat()],
+            ["Fim", processing_finished_at.isoformat()],
+            ["Duracao", f"{processing_duration_seconds:.3f} segundos"],
+            ["Etapas medidas", "Carga/preparacao dos dados, probabilidades, restricoes e solver linear."],
+        ],
+        [4.4 * cm, 11.2 * cm],
+        header_color=INK,
+    )
+    story.append(timing_table)
+
+    add_heading(story, "4. Algoritmos matematicos usados", h2)
     story.append(
         Paragraph(
             "Abaixo estao os principais algoritmos matematicos implementados no "
@@ -484,7 +511,7 @@ def build_report() -> None:
         )
     )
 
-    add_heading(story, "4. Exemplo de pergunta do usuario", h2)
+    add_heading(story, "5. Exemplo de pergunta do usuario", h2)
     story.append(
         Paragraph(
             "Na interface, o usuario pode escolher uma pergunta A e uma ou mais "
@@ -495,7 +522,7 @@ def build_report() -> None:
     story.append(Paragraph("A = label=rice<br/>B = ph=acido, rainfall=alto", code))
     story.append(Paragraph("Consulta: P(label=rice | ph=acido, rainfall=alto)", body))
 
-    add_heading(story, "5. Saida probabilistica", h2)
+    add_heading(story, "6. Saida probabilistica", h2)
     metrics_table = styled_table(
         [
             ["Metrica", "Valor", "Interpretacao"],
@@ -526,7 +553,7 @@ def build_report() -> None:
         )
     )
 
-    add_heading(story, "6. Grafico do intervalo linear", h2)
+    add_heading(story, "7. Grafico do intervalo linear", h2)
     story.append(
         Paragraph(
             "O grafico abaixo compara o valor empirico da confianca com o intervalo "
@@ -538,7 +565,7 @@ def build_report() -> None:
     )
     story.append(interval_chart(confidence, lp_lower, lp_upper))
 
-    add_heading(story, "7. Probabilidades lineares consideradas", h2)
+    add_heading(story, "8. Probabilidades lineares consideradas", h2)
     story.append(
         Paragraph(
             "No modelo atual entram automaticamente as probabilidades lineares mais "
@@ -565,7 +592,7 @@ def build_report() -> None:
     )
     story.append(linear_table)
 
-    add_heading(story, "8. Programacao linear", h2)
+    add_heading(story, "9. Programacao linear", h2)
     story.append(
         Paragraph(
             "Cada mundo possivel w recebe uma variavel x_w, que representa a "
@@ -578,7 +605,7 @@ def build_report() -> None:
     )
     story.append(Paragraph(lp_text.replace("\n", "<br/>"), code))
 
-    add_heading(story, "9. Saida final apresentada ao usuario", h2)
+    add_heading(story, "10. Saida final apresentada ao usuario", h2)
     if lp.get("ok"):
         interval_text = f"{fmt(lp['lower'])} <= P(A | B) <= {fmt(lp['upper'])}"
     else:
@@ -599,7 +626,7 @@ def build_report() -> None:
         )
     )
 
-    add_heading(story, "10. Arquivo de saida calculada", h2)
+    add_heading(story, "11. Arquivo de saida calculada", h2)
     story.append(
         Paragraph(
             "Alem do PDF, o gerador salva um JSON com a consulta, probabilidades, "
@@ -610,7 +637,7 @@ def build_report() -> None:
     )
     story.append(Paragraph("reports/saida_calculada_programacao_linear.json", code))
 
-    add_heading(story, "11. Relacao com o enunciado", h2)
+    add_heading(story, "12. Relacao com o enunciado", h2)
     story.append(
         Paragraph(
             "A saida comprova que o sistema extrai conhecimento probabilistico "

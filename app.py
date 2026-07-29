@@ -3,6 +3,8 @@ from __future__ import annotations
 import csv
 import math
 import os
+import time
+from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -330,6 +332,8 @@ def metadata():
 
 @app.post("/api/query")
 def query():
+    started_at = datetime.now(timezone.utc)
+    started_perf = time.perf_counter()
     try:
         payload = request.get_json(force=True)
         data = load_dataset()
@@ -346,10 +350,18 @@ def query():
     confidence = p_ab / p_b if p_b > 0 else None
     lift = confidence / p_a if confidence is not None and p_a > 0 else None
     lp = solve_linear_interval(data["worlds"], rows, target, base)
+    finished_at = datetime.now(timezone.utc)
+    duration_seconds = time.perf_counter() - started_perf
 
     return jsonify(
         {
             "ok": True,
+            "processing": {
+                "startedAt": started_at.isoformat(),
+                "finishedAt": finished_at.isoformat(),
+                "durationSeconds": duration_seconds,
+                "durationMilliseconds": round(duration_seconds * 1000, 3),
+            },
             "target": target,
             "conditions": base,
             "support": p_ab,
