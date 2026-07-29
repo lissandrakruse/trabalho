@@ -19,4 +19,16 @@ Build Command: python -m pip install --upgrade pip setuptools wheel && python -m
 Start Command: gunicorn app:app --bind 0.0.0.0:$PORT --timeout 120
 ```
 
+O projeto fixa Python em `.python-version`:
+
+```text
+3.11.9
+```
+
+Se o Render ainda mostrar `Using Python version 3.14.3 (default)`, adicione em **Environment**:
+
+```text
+PYTHON_VERSION=3.11.9
+```
+
 Nao precisa configurar variaveis de ambiente.
