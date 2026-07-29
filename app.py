@@ -861,6 +861,9 @@ def solver_comparison_report():
             "ok": True,
             "reportUrl": "/reports/generated/relatorio_comparacao_solver.pdf",
             "message": "Relatorio comparativo gerado com sucesso.",
+            "main": result["main"],
+            "standaloneSolver": result["standaloneSolver"],
+            "comparison": result["comparison"],
         }
     )
 

@@ -262,6 +262,8 @@ async function generateReport() {
 async function generateSolverReport() {
   generateSolverReportButton.disabled = true;
   generateSolverReportButton.textContent = "Gerando comparativo...";
+  solverCompareStatus.textContent = "Resolvendo solver e gerando relatorio";
+  solverComparison.innerHTML = "";
   downloadSolverReportLink.classList.add("is-hidden");
 
   try {
@@ -272,6 +274,10 @@ async function generateSolverReport() {
     });
     const result = await response.json();
     if (!response.ok || !result.ok) throw new Error(result.error || "Erro ao gerar comparativo.");
+    renderSolverComparison({
+      ...result,
+      message: "Solver separado resolvido com os mesmos dados da consulta. Relatorio comparativo gerado com sucesso.",
+    });
     const reportUrl = `${result.reportUrl}?t=${Date.now()}`;
     downloadSolverReportLink.href = reportUrl;
     downloadSolverReportLink.classList.remove("is-hidden");
