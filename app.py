@@ -877,7 +877,8 @@ def compute_query(
         "total": data["total"],
         "linear": lp,
         "classification": classification,
-        "linearProgram": linear_program_text(target, base, p_a, p_b, p_ab, lp),
+        "linearProgramSummary": linear_program_text(target, base, p_a, p_b, p_ab, lp),
+        "linearProgram": full_linear_program_text(data["worlds"], rows, target, base, lp),
         "conclusion": conclusion,
     }
 

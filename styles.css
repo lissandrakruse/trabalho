@@ -436,7 +436,7 @@ select {
 
 .lp-box {
   min-height: 260px;
-  max-height: 460px;
+  max-height: 620px;
   overflow: auto;
   margin: 0;
   padding: 14px;
@@ -445,7 +445,7 @@ select {
   color: #e8f3f1;
   font-size: 13px;
   line-height: 1.45;
-  white-space: pre-wrap;
+  white-space: pre;
 }
 
 .math-model {
