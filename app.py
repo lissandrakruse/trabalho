@@ -14,6 +14,8 @@ from flask import Flask, jsonify, request, send_from_directory
 
 ROOT = Path(__file__).resolve().parent
 DATASET_PATH = ROOT / "data" / "Crop_recommendation.csv"
+GENERATED_REPORT_DIR = ROOT / "reports" / "generated"
+QUERY_REPORT_PATH = GENERATED_REPORT_DIR / "relatorio_consulta_atual.pdf"
 KNOWN_LABELS = {
     "N": "Nitrogenio",
     "P": "Fosforo",
@@ -427,17 +429,12 @@ def metadata():
     )
 
 
-@app.post("/api/query")
-def query():
+def compute_query(payload: dict[str, Any]) -> dict[str, Any]:
     started_at = datetime.now(timezone.utc)
     started_perf = time.perf_counter()
-    try:
-        payload = request.get_json(force=True)
-        data = load_dataset()
-        base = valid_conditions(payload.get("conditions", []), data["domains"])
-        target = valid_conditions([payload.get("target", {})], data["domains"])[0]
-    except ValueError as error:
-        return jsonify({"ok": False, "error": str(error)}), 400
+    data = load_dataset()
+    base = valid_conditions(payload.get("conditions", []), data["domains"])
+    target = valid_conditions([payload.get("target", {})], data["domains"])[0]
 
     rows = data["rows"]
     both = [*base, target]
@@ -453,28 +450,158 @@ def query():
     duration_seconds = time.perf_counter() - started_perf
     conclusion = conclusion_text(target, base, p_ab, confidence, lift, p_b, count_base, count_both, lp)
 
+    return {
+        "ok": True,
+        "processing": {
+            "startedAt": started_at.isoformat(),
+            "finishedAt": finished_at.isoformat(),
+            "durationSeconds": duration_seconds,
+            "durationMilliseconds": round(duration_seconds * 1000, 3),
+        },
+        "target": target,
+        "conditions": base,
+        "support": p_ab,
+        "confidence": confidence,
+        "lift": lift,
+        "pA": p_a,
+        "pB": p_b,
+        "countBoth": count_both,
+        "countBase": count_base,
+        "total": data["total"],
+        "linear": lp,
+        "linearProgram": linear_program_text(target, base, p_a, p_b, p_ab, lp),
+        "conclusion": conclusion,
+    }
+
+
+@app.post("/api/query")
+def query():
+    try:
+        result = compute_query(request.get_json(force=True))
+    except ValueError as error:
+        return jsonify({"ok": False, "error": str(error)}), 400
+    return jsonify(result)
+
+
+def format_report_probability(value: float | None) -> str:
+    return fmt_probability(value).replace(".", ",")
+
+
+def write_query_report(result: dict[str, Any]) -> None:
+    try:
+        from reportlab.lib import colors
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+        from reportlab.lib.units import cm
+        from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+    except Exception as error:
+        raise RuntimeError(f"ReportLab indisponivel para gerar PDF: {error}") from error
+
+    GENERATED_REPORT_DIR.mkdir(parents=True, exist_ok=True)
+    styles = getSampleStyleSheet()
+    title = ParagraphStyle(
+        "TitleCustom",
+        parent=styles["Title"],
+        fontName="Helvetica-Bold",
+        fontSize=18,
+        leading=22,
+        alignment=1,
+        textColor=colors.HexColor("#111827"),
+    )
+    body = ParagraphStyle(
+        "BodyCustom",
+        parent=styles["BodyText"],
+        fontSize=10,
+        leading=14,
+        spaceAfter=6,
+    )
+    code = ParagraphStyle(
+        "CodeCustom",
+        parent=styles["Code"],
+        fontName="Courier",
+        fontSize=8,
+        leading=10,
+        backColor=colors.HexColor("#f3f4f6"),
+        borderPadding=6,
+    )
+
+    def table(rows: list[list[str]]) -> Table:
+        created = Table(rows, colWidths=[5.5 * cm, 10.1 * cm])
+        created.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0f766e")),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                    ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#e5e7eb")),
+                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("FONTSIZE", (0, 0), (-1, -1), 9),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f7faf9")]),
+                ]
+            )
+        )
+        return created
+
+    target = event_key([result["target"]])
+    conditions = event_key(result["conditions"])
+    linear = result["linear"]
+    interval = (
+        f"{format_report_probability(linear.get('lower'))} <= P(A | B) <= {format_report_probability(linear.get('upper'))}"
+        if linear.get("ok")
+        else linear.get("error", "Nao calculado")
+    )
+    story = [
+        Paragraph("Relatorio da Consulta Atual", title),
+        Spacer(1, 0.2 * cm),
+        Paragraph(f"Consulta: P({target} | {conditions})", body),
+        table(
+            [
+                ["Metrica", "Valor"],
+                ["P(A)", format_report_probability(result["pA"])],
+                ["P(B)", format_report_probability(result["pB"])],
+                ["Suporte P(A e B)", format_report_probability(result["support"])],
+                ["Confianca P(A | B)", format_report_probability(result["confidence"])],
+                ["Lift", format_report_probability(result["lift"])],
+                ["Instancias", f"{result['countBoth']} / {result['countBase']}"],
+                ["Intervalo linear", interval],
+                ["Inicio", result["processing"]["startedAt"]],
+                ["Fim", result["processing"]["finishedAt"]],
+                ["Duracao", f"{result['processing']['durationSeconds']:.3f} segundos"],
+            ]
+        ),
+        Spacer(1, 0.18 * cm),
+        Paragraph("Conclusao", styles["Heading2"]),
+        Paragraph(result["conclusion"], body),
+        Paragraph("Programa linear", styles["Heading2"]),
+        Paragraph(result["linearProgram"].replace("\n", "<br/>"), code),
+    ]
+
+    doc = SimpleDocTemplate(
+        str(QUERY_REPORT_PATH),
+        pagesize=A4,
+        rightMargin=1.8 * cm,
+        leftMargin=1.8 * cm,
+        topMargin=1.5 * cm,
+        bottomMargin=1.4 * cm,
+        title="Relatorio da Consulta Atual",
+    )
+    doc.build(story)
+
+
+@app.post("/api/report/query")
+def query_report():
+    try:
+        result = compute_query(request.get_json(force=True))
+        write_query_report(result)
+    except ValueError as error:
+        return jsonify({"ok": False, "error": str(error)}), 400
+    except RuntimeError as error:
+        return jsonify({"ok": False, "error": str(error)}), 500
     return jsonify(
         {
             "ok": True,
-            "processing": {
-                "startedAt": started_at.isoformat(),
-                "finishedAt": finished_at.isoformat(),
-                "durationSeconds": duration_seconds,
-                "durationMilliseconds": round(duration_seconds * 1000, 3),
-            },
-            "target": target,
-            "conditions": base,
-            "support": p_ab,
-            "confidence": confidence,
-            "lift": lift,
-            "pA": p_a,
-            "pB": p_b,
-            "countBoth": count_both,
-            "countBase": count_base,
-            "total": data["total"],
-            "linear": lp,
-            "linearProgram": linear_program_text(target, base, p_a, p_b, p_ab, lp),
-            "conclusion": conclusion,
+            "reportUrl": "/reports/generated/relatorio_consulta_atual.pdf",
+            "message": "Relatorio gerado com sucesso.",
         }
     )
 

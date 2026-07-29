@@ -2,3 +2,4 @@ agrocultura/
 .vscode/
 README.md
 __pycache__/
+reports/generated/

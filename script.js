@@ -4,6 +4,8 @@ const addConditionButton = document.querySelector("#addCondition");
 const runQueryButton = document.querySelector("#runQuery");
 const targetAttribute = document.querySelector("#targetAttribute");
 const targetValue = document.querySelector("#targetValue");
+const generateReportButton = document.querySelector("#generateReport");
+const downloadReportLink = document.querySelector("#downloadReport");
 const supportValue = document.querySelector("#supportValue");
 const confidenceValue = document.querySelector("#confidenceValue");
 const liftValue = document.querySelector("#liftValue");
@@ -132,6 +134,36 @@ async function runQuery() {
   }
 }
 
+async function generateReport() {
+  generateReportButton.disabled = true;
+  generateReportButton.textContent = "Gerando...";
+  const payload = {
+    conditions: readConditions(),
+    target: {
+      attribute: targetAttribute.value,
+      value: targetValue.value,
+    },
+  };
+
+  try {
+    const response = await fetch("/api/report/query", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const result = await response.json();
+    if (!response.ok || !result.ok) throw new Error(result.error || "Erro ao gerar relatório.");
+    const reportUrl = `${result.reportUrl}?t=${Date.now()}`;
+    downloadReportLink.href = reportUrl;
+    window.open(reportUrl, "_blank", "noopener");
+  } catch (error) {
+    probabilityText.innerHTML += `<div><strong>Relatório:</strong> ${error.message}</div>`;
+  } finally {
+    generateReportButton.disabled = false;
+    generateReportButton.textContent = "Gerar PDF";
+  }
+}
+
 async function boot() {
   const response = await fetch("/api/metadata");
   const metadata = await response.json();
@@ -146,6 +178,7 @@ async function boot() {
   targetAttribute.addEventListener("change", () => fillValueSelect(targetAttribute, targetValue));
   addConditionButton.addEventListener("click", () => createConditionRow());
   runQueryButton.addEventListener("click", runQuery);
+  generateReportButton.addEventListener("click", generateReport);
 
   const firstCondition = firstAttributeExcept(targetAttribute.value);
   createConditionRow(firstCondition, domains[firstCondition]?.[0]);
