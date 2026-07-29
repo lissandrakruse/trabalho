@@ -1,8 +1,30 @@
 # Script separado do solver
 
-O solver tambem existe como script separado. Ele nao sobe Flask, nao usa a
-interface e nao importa `app.py`; apenas le o CSV do dataset e devolve o
-resultado em JSON.
+O solver tambem pode ser executado sem abrir a interface. Ele nao sobe Flask,
+nao usa o layout e nao depende de `app.py`; apenas le o CSV do dataset, resolve
+a consulta por programacao linear e devolve o resultado.
+
+## Execucao simples
+
+Para executar uma consulta padrao e salvar o JSON automaticamente:
+
+```bash
+python solver.py
+```
+
+Esse comando calcula:
+
+```text
+P(label=rice | ph=acido, rainfall=alto)
+```
+
+e salva a saida completa em:
+
+```text
+reports/generated/solver_resultado_padrao.json
+```
+
+## Execucao personalizada
 
 ```bash
 python scripts/solve_query.py --target label=rice --condition ph=acido --condition rainfall=alto
