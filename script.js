@@ -305,10 +305,9 @@ async function runQuery() {
 
     const queriedRule = result.queriedAssociationRule || null;
     const releasedRule = result.releasedAssociationRule || null;
-    const cardRule = queriedRule || releasedRule;
-    supportValue.textContent = cardRule ? fmt(cardRule.support) : "-";
-    confidenceValue.textContent = cardRule ? fmt(cardRule.confidence) : "-";
-    liftValue.textContent = cardRule ? fmt(cardRule.lift) : "-";
+    supportValue.textContent = releasedRule ? fmt(releasedRule.support) : "-";
+    confidenceValue.textContent = releasedRule ? fmt(releasedRule.confidence) : "-";
+    liftValue.textContent = releasedRule ? fmt(releasedRule.lift) : "-";
     countValue.textContent = `${result.countBoth}/${result.countBase}`;
 
     let linearInterval = `<div><strong>Intervalo linear:</strong> solver indisponível.</div>`;
@@ -324,21 +323,21 @@ async function runQuery() {
       : "";
     const releasedRuleNotice = releasedRule
       ? `<div><strong>Regra liberada encontrada:</strong> os cards usam suporte, confianca e lift fornecidos pela ferramenta de extracao de regras.</div>`
-      : `<div><strong>Regra avaliada, mas nao liberada:</strong> os cards mostram as metricas retornadas pela extracao; o status abaixo explica por que ela nao passou nos limiares.</div>`;
-    const ruleMetricContent = cardRule
+      : `<div><strong>Sem regra liberada:</strong> a ferramenta de extracao avaliou esta consulta, mas nao liberou a regra. Por isso suporte, confianca e lift ficam sem valor nos cards.</div>`;
+    const ruleMetricContent = releasedRule
       ? [
-          `<div><strong>Suporte:</strong> ${fmt(cardRule.support)} retornado pela extracao.</div>`,
-          `<div><strong>Confianca/Precisao:</strong> ${fmt(cardRule.confidence)} retornada pela extracao.</div>`,
-          `<div><strong>Lift:</strong> ${fmt(cardRule.lift)} retornado pela extracao.</div>`,
+          `<div><strong>Suporte:</strong> ${fmt(releasedRule.support)} fornecido pela regra liberada.</div>`,
+          `<div><strong>Confianca/Precisao:</strong> ${fmt(releasedRule.confidence)} fornecida pela regra liberada.</div>`,
+          `<div><strong>Lift:</strong> ${fmt(releasedRule.lift)} fornecido pela regra liberada.</div>`,
         ].join("")
-      : `<div><strong>Suporte, confianca e lift:</strong> - (regra nao avaliada pela extracao).</div>`;
+      : `<div><strong>Suporte, confianca e lift nos cards:</strong> - (nenhuma regra liberada para esta consulta).</div>`;
     const queriedRuleContent = queriedRule
-      ? `<div><strong>Regra consultada na extracao:</strong> suporte=${fmt(queriedRule.support)}, confianca=${fmt(queriedRule.confidence)}, lift=${fmt(queriedRule.lift)}; status=${escapeHtml(queriedRule.reason || "-")}.</div>`
+      ? `<div><strong>Status da regra consultada:</strong> ${escapeHtml(queriedRule.reason || "-")}.</div>`
       : "";
     const conclusionContent = releasedRule
       ? result.conclusion
-      : `Para ${eventLabel(result.conditions)} -> ${eventLabel([result.target])}, a ferramenta de extracao retornou as metricas da regra, mas nao liberou a regra pelos limiares configurados.`;
-    const ruleLabel = releasedRule ? "Regra liberada" : "Regra avaliada sem liberacao";
+      : `Para ${eventLabel(result.conditions)} -> ${eventLabel([result.target])}, a ferramenta de extracao nao liberou uma regra. A interface mostra apenas o status da extracao e mantem suporte, confianca e lift sem valor.`;
+    const ruleLabel = releasedRule ? "Regra liberada" : "Consulta sem regra liberada";
     const learnedRuleCount = result.learnedAssociationRules?.length || 0;
     const topLearnedRule = result.learnedAssociationRules?.[0];
     const learnedRulePreview = topLearnedRule
@@ -368,7 +367,7 @@ async function runQuery() {
     probabilityText.innerHTML = [
       zeroResultNotice,
       releasedRuleNotice,
-      `<div><strong>Metricas dos cards:</strong> suporte, confianca e lift vem da regra consultada pela ferramenta de extracao; a liberacao da regra aparece como status separado.</div>`,
+      `<div><strong>Metricas dos cards:</strong> suporte, confianca e lift aparecem somente quando a ferramenta de extracao libera a regra consultada; as demais regras liberadas aparecem separadas na tabela abaixo.</div>`,
       `<div><strong>${ruleLabel}:</strong> se ${eventLabel(result.conditions)}, entao ${eventLabel([result.target])}.</div>`,
       ruleMetricContent,
       queriedRuleContent,
