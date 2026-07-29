@@ -111,6 +111,18 @@ function escapeHtml(value) {
   })[character]);
 }
 
+async function readJsonResponse(response) {
+  const text = await response.text();
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    const preview = text.trim().slice(0, 160);
+    throw new Error(
+      `Resposta invalida do servidor (${response.status}). A API retornou texto/HTML em vez de JSON: ${preview || "resposta vazia"}`
+    );
+  }
+}
+
 function intervalText(value) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return "-";
   const rounded = Number(value).toFixed(3);
@@ -288,7 +300,7 @@ async function runQuery() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    const result = await response.json();
+    const result = await readJsonResponse(response);
     if (!response.ok || !result.ok) throw new Error(result.error || "Erro na consulta.");
 
     const queriedRule = result.queriedAssociationRule || null;
@@ -389,7 +401,7 @@ async function generateReport() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    const result = await response.json();
+    const result = await readJsonResponse(response);
     if (!response.ok || !result.ok) throw new Error(result.error || "Erro ao gerar relatório.");
     const reportUrl = `${result.reportUrl}?t=${Date.now()}`;
     downloadReportLink.href = reportUrl;
@@ -416,7 +428,7 @@ async function generateSolverReport() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(buildPayload()),
     });
-    const result = await response.json();
+    const result = await readJsonResponse(response);
     if (!response.ok || !result.ok) throw new Error(result.error || "Erro ao gerar comparativo.");
     renderSolverComparison({
       ...result,
@@ -447,7 +459,7 @@ async function compareSolver() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(buildPayload()),
     });
-    const result = await response.json();
+    const result = await readJsonResponse(response);
     if (!response.ok || !result.ok) throw new Error(result.error || "Erro ao comparar solver.");
     renderSolverComparison(result);
   } catch (error) {
@@ -473,7 +485,7 @@ async function generateFullLinearProgram(downloadAfter = false) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(buildPayload()),
     });
-    const result = await response.json();
+    const result = await readJsonResponse(response);
     if (!response.ok || !result.ok) throw new Error(result.error || "Erro ao gerar LP completo.");
     const downloadUrl = `${result.downloadUrl || result.fileUrl}?t=${Date.now()}`;
     downloadFullLinearProgramLink.href = downloadUrl;
@@ -502,7 +514,7 @@ async function generateFullLinearProgram(downloadAfter = false) {
 async function boot() {
   const response = await fetch("/api/metadata");
   if (!response.ok) throw new Error("API Python indisponivel.");
-  const metadata = await response.json();
+  const metadata = await readJsonResponse(response);
   domains = metadata.domains;
   labels = metadata.labels;
   attributes = metadata.attributes;

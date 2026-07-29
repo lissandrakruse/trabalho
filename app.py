@@ -1305,6 +1305,8 @@ def query():
         result = compute_query(request.get_json(force=True))
     except ValueError as error:
         return jsonify({"ok": False, "error": str(error)}), 400
+    except Exception as error:
+        return jsonify({"ok": False, "error": f"Erro ao executar consulta: {error}"}), 500
     return jsonify(result)
 
 
