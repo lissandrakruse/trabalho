@@ -486,6 +486,41 @@ def compute_query(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def compare_number(main_value: float | int | None, solver_value: float | int | None) -> dict[str, Any]:
+    if main_value is None or solver_value is None:
+        return {
+            "main": main_value,
+            "solver": solver_value,
+            "difference": None,
+            "match": main_value == solver_value,
+        }
+    difference = abs(float(main_value) - float(solver_value))
+    return {
+        "main": main_value,
+        "solver": solver_value,
+        "difference": difference,
+        "match": difference <= 1e-9,
+    }
+
+
+def compare_solver_result(main_result: dict[str, Any], solver_result: dict[str, Any]) -> dict[str, Any]:
+    fields = ["pA", "pB", "support", "confidence", "lift", "countBoth", "countBase"]
+    metrics = {
+        field: compare_number(main_result.get(field), solver_result.get(field))
+        for field in fields
+    }
+    main_linear = main_result.get("linear", {})
+    solver_linear = solver_result.get("linear", {})
+    metrics["linearLower"] = compare_number(main_linear.get("lower"), solver_linear.get("lower"))
+    metrics["linearUpper"] = compare_number(main_linear.get("upper"), solver_linear.get("upper"))
+    metrics["variables"] = compare_number(main_linear.get("variables"), solver_linear.get("variables"))
+    metrics["constraints"] = compare_number(main_linear.get("constraints"), solver_linear.get("constraints"))
+    return {
+        "allMatch": all(item["match"] for item in metrics.values()),
+        "metrics": metrics,
+    }
+
+
 @app.post("/api/query")
 def query():
     try:
@@ -493,6 +528,34 @@ def query():
     except ValueError as error:
         return jsonify({"ok": False, "error": str(error)}), 400
     return jsonify(result)
+
+
+@app.post("/api/solver/compare")
+def solver_compare():
+    try:
+        payload = request.get_json(force=True)
+        main_result = compute_query(payload)
+
+        from scripts import solve_query as standalone_solver
+
+        solver_data = standalone_solver.load_dataset(standalone_solver.DEFAULT_DATASET)
+        solver_target = standalone_solver.validate_conditions([main_result["target"]], solver_data["domains"])[0]
+        solver_conditions = standalone_solver.validate_conditions(main_result["conditions"], solver_data["domains"])
+        solver_result = standalone_solver.compute_query(solver_data, solver_target, solver_conditions)
+    except ValueError as error:
+        return jsonify({"ok": False, "error": str(error)}), 400
+    except Exception as error:
+        return jsonify({"ok": False, "error": f"Solver separado indisponivel: {error}"}), 500
+
+    return jsonify(
+        {
+            "ok": True,
+            "main": main_result,
+            "standaloneSolver": solver_result,
+            "comparison": compare_solver_result(main_result, solver_result),
+            "message": "Comparacao executada com o solver separado scripts/solve_query.py.",
+        }
+    )
 
 
 def format_report_probability(value: float | None) -> str:

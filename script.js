@@ -5,12 +5,15 @@ const runQueryButton = document.querySelector("#runQuery");
 const targetAttribute = document.querySelector("#targetAttribute");
 const targetValue = document.querySelector("#targetValue");
 const generateReportButton = document.querySelector("#generateReport");
+const compareSolverButton = document.querySelector("#compareSolver");
 const downloadReportLink = document.querySelector("#downloadReport");
 const supportValue = document.querySelector("#supportValue");
 const confidenceValue = document.querySelector("#confidenceValue");
 const liftValue = document.querySelector("#liftValue");
 const countValue = document.querySelector("#countValue");
 const probabilityText = document.querySelector("#probabilityText");
+const solverCompareStatus = document.querySelector("#solverCompareStatus");
+const solverComparison = document.querySelector("#solverComparison");
 const linearProgram = document.querySelector("#linearProgram");
 const mathModel = document.querySelector("#mathModel");
 const tabButtons = document.querySelectorAll(".tab-button");
@@ -81,6 +84,12 @@ function fmt(value) {
   return Number(value).toFixed(3);
 }
 
+function fmtCompare(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return "-";
+  const number = Number(value);
+  return Number.isInteger(number) ? String(number) : number.toFixed(3);
+}
+
 function eventLabel(conditions) {
   if (!conditions.length) return "verdadeiro";
   return conditions.map((condition) => `${condition.attribute}=${condition.value}`).join(", ");
@@ -104,6 +113,16 @@ function intervalText(value) {
   return `${lower} <= ${rounded} <= ${upper}`;
 }
 
+function buildPayload() {
+  return {
+    conditions: readConditions(),
+    target: {
+      attribute: targetAttribute.value,
+      value: targetValue.value,
+    },
+  };
+}
+
 function setActiveTab(activeButton) {
   tabButtons.forEach((button) => {
     const isActive = button === activeButton;
@@ -114,6 +133,35 @@ function setActiveTab(activeButton) {
   tabPanels.forEach((panel) => {
     panel.classList.toggle("is-active", panel.id === activeButton.getAttribute("aria-controls"));
   });
+}
+
+function renderSolverComparison(result) {
+  const labels = {
+    pA: "P(A)",
+    pB: "P(B)",
+    support: "P(A e B)",
+    confidence: "P(A | B)",
+    lift: "Lift",
+    countBoth: "Casos A e B",
+    countBase: "Casos B",
+    linearLower: "Limite inferior",
+    linearUpper: "Limite superior",
+    variables: "Variaveis",
+    constraints: "Restricoes",
+  };
+  const rows = Object.entries(result.comparison.metrics).map(([key, item]) => {
+    const difference = item.difference === null ? "-" : Number(item.difference).toExponential(2);
+    const status = item.match ? "Igual" : "Diferente";
+    return `<tr><td>${labels[key] || key}</td><td>${fmtCompare(item.main)}</td><td>${fmtCompare(item.solver)}</td><td>${difference}</td><td>${status}</td></tr>`;
+  });
+
+  solverCompareStatus.textContent = result.comparison.allMatch ? "Resultados iguais" : "Diferencas encontradas";
+  solverComparison.innerHTML = [
+    `<p>${escapeHtml(result.message)}</p>`,
+    `<table><thead><tr><th>Metrica</th><th>Projeto</th><th>Solver separado</th><th>Diferenca</th><th>Status</th></tr></thead><tbody>`,
+    rows.join(""),
+    `</tbody></table>`,
+  ].join("");
 }
 
 function renderMathModel(result) {
@@ -140,13 +188,7 @@ async function runQuery() {
   runQueryButton.disabled = true;
   runQueryButton.textContent = "Resolvendo...";
   downloadReportLink.classList.add("is-hidden");
-  const payload = {
-    conditions: readConditions(),
-    target: {
-      attribute: targetAttribute.value,
-      value: targetValue.value,
-    },
-  };
+  const payload = buildPayload();
 
   try {
     const response = await fetch("/api/query", {
@@ -193,13 +235,7 @@ async function runQuery() {
 async function generateReport() {
   generateReportButton.disabled = true;
   generateReportButton.textContent = "Gerando...";
-  const payload = {
-    conditions: readConditions(),
-    target: {
-      attribute: targetAttribute.value,
-      value: targetValue.value,
-    },
-  };
+  const payload = buildPayload();
 
   try {
     const response = await fetch("/api/report/query", {
@@ -221,6 +257,30 @@ async function generateReport() {
   }
 }
 
+async function compareSolver() {
+  compareSolverButton.disabled = true;
+  compareSolverButton.textContent = "Comparando...";
+  solverCompareStatus.textContent = "Executando solver";
+  solverComparison.innerHTML = "";
+
+  try {
+    const response = await fetch("/api/solver/compare", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(buildPayload()),
+    });
+    const result = await response.json();
+    if (!response.ok || !result.ok) throw new Error(result.error || "Erro ao comparar solver.");
+    renderSolverComparison(result);
+  } catch (error) {
+    solverCompareStatus.textContent = "Erro";
+    solverComparison.innerHTML = `<p><strong>Erro:</strong> ${escapeHtml(error.message)}</p>`;
+  } finally {
+    compareSolverButton.disabled = false;
+    compareSolverButton.textContent = "Comparar solver separado";
+  }
+}
+
 async function boot() {
   const response = await fetch("/api/metadata");
   if (!response.ok) throw new Error("API Python indisponivel.");
@@ -237,6 +297,7 @@ async function boot() {
   addConditionButton.addEventListener("click", () => createConditionRow());
   runQueryButton.addEventListener("click", runQuery);
   generateReportButton.addEventListener("click", generateReport);
+  compareSolverButton.addEventListener("click", compareSolver);
   tabButtons.forEach((button) => {
     button.addEventListener("click", () => setActiveTab(button));
   });

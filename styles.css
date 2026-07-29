@@ -266,6 +266,38 @@ select {
   line-height: 1.5;
 }
 
+.solver-comparison {
+  overflow-x: auto;
+  color: #27343c;
+}
+
+.solver-comparison p {
+  margin-bottom: 12px;
+  color: #43535d;
+  line-height: 1.45;
+}
+
+.solver-comparison table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 680px;
+  font-size: 13px;
+}
+
+.solver-comparison th,
+.solver-comparison td {
+  padding: 10px;
+  border-bottom: 1px solid #dbe5e9;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.solver-comparison th {
+  background: #eef4f5;
+  color: #17352f;
+  font-weight: 800;
+}
+
 .lp-box {
   min-height: 260px;
   max-height: 460px;
@@ -327,7 +359,8 @@ select {
 }
 
 .panel:nth-of-type(4),
-.panel:nth-of-type(5) {
+.panel:nth-of-type(5),
+.panel:nth-of-type(6) {
   grid-column: 1 / -1;
 }
 

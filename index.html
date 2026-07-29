@@ -43,6 +43,7 @@
           <button class="primary-action" id="runQuery" type="button">Consultar</button>
           <div class="report-actions">
             <button class="secondary-action" id="generateReport" type="button">Gerar PDF</button>
+            <button class="secondary-action" id="compareSolver" type="button">Comparar solver separado</button>
             <a class="download-link is-hidden" id="downloadReport" href="/reports/generated/relatorio_consulta_atual.pdf" target="_blank" rel="noopener">Baixar PDF</a>
           </div>
         </section>
@@ -71,6 +72,14 @@
             <h2>Resultado Probabilístico</h2>
           </div>
           <div class="explanation" id="probabilityText"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Comparacao com Solver Separado</h2>
+            <span id="solverCompareStatus">Aguardando execucao</span>
+          </div>
+          <div class="solver-comparison" id="solverComparison"></div>
         </section>
 
         <section class="panel">
