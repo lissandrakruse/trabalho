@@ -189,6 +189,32 @@ def mask_expression(conditions: list[dict[str, str]]) -> str:
     return f"soma(x_w onde {event_key(conditions)})"
 
 
+def fmt_lp_number(value: float | None) -> str:
+    if value is None:
+        return "-"
+    return f"{value:.3f}"
+
+
+def association_rule_description(
+    rows: list[dict[str, str]],
+    antecedent: list[dict[str, str]],
+    consequent: list[dict[str, str]],
+) -> str:
+    p_antecedent = probability(rows, antecedent)
+    p_consequent = probability(rows, consequent)
+    p_both = probability(rows, [*antecedent, *consequent])
+    confidence = p_both / p_antecedent if p_antecedent > 0 else None
+    lift = confidence / p_consequent if confidence is not None and p_consequent > 0 else None
+    return (
+        f"{event_key(antecedent)} -> {event_key(consequent)} | "
+        f"P(antecedente)={fmt_lp_number(p_antecedent)}, "
+        f"P(consequente)={fmt_lp_number(p_consequent)}, "
+        f"P(antecedente e consequente)={fmt_lp_number(p_both)}, "
+        f"confianca={fmt_lp_number(confidence)}, "
+        f"lift={fmt_lp_number(lift)}"
+    )
+
+
 def add_vectors(left: list[float], right: list[float], right_scale: float = 1.0) -> list[float]:
     return [left_item + right_scale * right_item for left_item, right_item in zip(left, right)]
 
@@ -442,6 +468,13 @@ def full_linear_program_text(
 ) -> str:
     _, _, records = build_linear_constraints(worlds, rows, target, base)
     both = [*base, target]
+    attributes = list(rows[0].keys())
+    domains = {
+        attribute: sorted({row[attribute] for row in rows})
+        for attribute in attributes
+    }
+    target_attribute = target["attribute"]
+    target_values = domains.get(target_attribute, [target["value"]])
     lines = [
         "PROGRAMA LINEAR COMPLETO DA CONSULTA",
         "",
@@ -476,14 +509,63 @@ def full_linear_program_text(
         "  Se B possui duas afirmacoes e A possui uma, P(A e B) aparece com tres condicoes porque representa a intersecao completa.",
         "  Alem da consulta selecionada, este arquivo inclui restricoes conjuntas para cada par de atributos/valores da base.",
         "",
-        "RESTRICOES COMPLETAS",
+        "PROBABILIDADES EXPLICITAS DO EVENTO A",
         "",
+        f"Atributo alvo da consulta: {target_attribute}",
+        "P(A) para cada valor possivel do atributo alvo:",
     ]
+    for value in target_values:
+        candidate = [{"attribute": target_attribute, "value": value}]
+        lines.append(f"  P({event_key(candidate)}) = {probability(rows, candidate):.3f}")
+
+    lines.extend(
+        [
+            "",
+            "P(A e B) para cada valor possivel de A mantendo o mesmo B da consulta:",
+        ]
+    )
+    for value in target_values:
+        candidate = [{"attribute": target_attribute, "value": value}]
+        candidate_joint = [*base, *candidate]
+        lines.append(f"  P({event_key(candidate_joint)}) = {probability(rows, candidate_joint):.3f}")
+
+    lines.extend(
+        [
+            "",
+            "REGRAS DE ASSOCIACAO LIGADAS A CONSULTA",
+            "",
+            "Regra selecionada completa B -> A:",
+            f"  {association_rule_description(rows, base, [target])}",
+            "",
+            "Regras B -> A para todos os valores possiveis do atributo alvo:",
+        ]
+    )
+    for value in target_values:
+        candidate = [{"attribute": target_attribute, "value": value}]
+        lines.append(f"  {association_rule_description(rows, base, candidate)}")
+
+    if len(base) > 1:
+        lines.extend(
+            [
+                "",
+                "Regras usando cada afirmacao individual de B contra o A selecionado:",
+            ]
+        )
+        for condition in base:
+            lines.append(f"  {association_rule_description(rows, [condition], [target])}")
+
+    lines.extend(
+        [
+            "",
+            "RESTRICOES COMPLETAS",
+            "",
+        ]
+    )
 
     grouped_titles = {
         "marginal": "1. Probabilidades marginais",
         "pairwise_joint": "2. Probabilidades conjuntas por pares de valores",
-        "association_rule": "3. Regras de associacao por pares: confianca P(consequente | antecedente)",
+        "association_rule": "3. Regras de associacao gerais usadas como restricao ativa",
         "selected_target": "4. Evento alvo A da consulta",
         "selected_base": "5. Evento condicionante B da consulta",
         "selected_joint": "6. Evento conjunto A e B da consulta",
