@@ -165,8 +165,9 @@ function renderSolverComparison(result) {
   const labels = {
     pA: "P(A)",
     pB: "P(B)",
-    support: "P(A e B)",
-    confidence: "P(A | B)",
+    pAB: "P(A e B) usado no PL",
+    support: "Suporte da regra",
+    confidence: "Confianca da regra",
     lift: "Lift",
     countBoth: "Casos A e B",
     countBase: "Casos B",
@@ -263,6 +264,10 @@ function renderMathModel(result) {
     ? `${fmt(result.linear.lower)} <= P(A | B) <= ${fmt(result.linear.upper)}`
     : "Nao calculado para esta consulta.";
   const learnedRules = result.learnedAssociationRules || [];
+  const releasedRule = result.releasedAssociationRule || null;
+  const releasedRuleText = releasedRule
+    ? `<code>${eventLabel(releasedRule.antecedent)} -> ${eventLabel(releasedRule.consequent)}; suporte=${fmt(releasedRule.support)}, confianca=${fmt(releasedRule.confidence)}, lift=${fmt(releasedRule.lift)}</code>`
+    : `<code>A consulta ${eventLabel(result.conditions)} -> ${eventLabel([result.target])} nao foi liberada pela extracao; suporte, confianca e lift ficam sem valor.</code>`;
   const learnedRuleItems = learnedRules.length
     ? learnedRules
         .map((rule) => `<code>${eventLabel(rule.antecedent)} -> ${eventLabel(rule.consequent)}; sup=${fmt(rule.support)}, conf=${fmt(rule.confidence)}, lift=${fmt(rule.lift)}</code>`)
@@ -270,13 +275,14 @@ function renderMathModel(result) {
     : "<code>Nenhuma regra aprendida atingiu os limiares.</code>";
 
   mathModel.innerHTML = [
-    `<section class="math-block"><h3>Regras aprendidas no PL</h3><p>Antes de resolver a consulta, o sistema minera regras gerais do dataset. Elas nao dependem do A e B escolhidos pelo usuario; entram no programa linear como conhecimento aprendido da base.</p><div class="constraint-list"><code>forma: antecedente -> consequente</code><code>suporte >= 0.010</code><code>confianca >= 0.200</code><code>lift >= 1.050</code>${learnedRuleItems}</div></section>`,
-    `<section class="math-block"><h3>1. Mundos e variáveis</h3><p>Cada mundo possível <strong>w</strong> representa uma combinação categorizada dos atributos do dataset. O modelo usa <strong>x<sub>w</sub></strong> como a probabilidade atribuída a esse mundo.</p><code>x<sub>w</sub> >= 0, para todo w em W &nbsp; (|W| = ${variableCount})</code></section>`,
-    `<section class="math-block"><h3>2. Normalização</h3><p>A distribuição reconstruída precisa somar 1.</p><code>sum<sub>w em W</sub> x<sub>w</sub> = 1</code></section>`,
-    `<section class="math-block"><h3>3. Evidências da base</h3><p>As frequências observadas viram restrições intervalares. A consulta atual define A = <strong>${aLabel}</strong> e B = <strong>${bLabel}</strong>.</p><div class="constraint-list"><code>P(A): ${intervalText(result.pA)}</code><code>P(B): ${intervalText(result.pB)}</code><code>P(A e B): ${intervalText(result.support)}</code></div><p>O solver também incorpora as probabilidades marginais dos valores categorizados de cada atributo.</p></section>`,
-    `<section class="math-block"><h3>4. Consulta condicional</h3><p>A pergunta é uma razão entre a probabilidade conjunta e a probabilidade do evento condicionante.</p><code>P(A | B) = P(A e B) / P(B) = sum(x<sub>w</sub> onde ${abLabel}) / sum(x<sub>w</sub> onde ${bLabel})</code></section>`,
-    `<section class="math-block"><h3>5. Charnes-Cooper</h3><p>Para resolver a razão como programação linear, o modelo aplica a transformação de Charnes-Cooper.</p><div class="constraint-list"><code>y<sub>w</sub> = x<sub>w</sub> / P(B)</code><code>t = 1 / P(B)</code><code>sum(y<sub>w</sub> onde B) = 1</code><code>A y - b t <= 0</code><code>sum<sub>w em W</sub> y<sub>w</sub> - t = 0</code></div></section>`,
-    `<section class="math-block"><h3>6. Objetivo</h3><p>O limite inferior minimiza a massa dos mundos que satisfazem A e B; o superior maximiza a mesma expressão.</p><div class="constraint-list"><code>min sum(y<sub>w</sub> onde ${abLabel})</code><code>max sum(y<sub>w</sub> onde ${abLabel})</code></div><p><strong>Resultado:</strong> ${interval}. Restrições lineares no solver: ${constraintCount}.</p></section>`,
+    `<section class="math-block"><h3>1. Preparacao da base</h3><p>O projeto le o dataset de recomendacao de culturas, transforma atributos numericos em faixas categoricas e deixa cada registro pronto para perguntas do tipo <strong>P(A | B)</strong>. Nesta consulta, A = <strong>${aLabel}</strong> e B = <strong>${bLabel}</strong>.</p><div class="constraint-list"><code>A = ${aLabel}</code><code>B = ${bLabel}</code><code>A e B = ${abLabel}</code></div></section>`,
+    `<section class="math-block"><h3>2. Mundos possiveis</h3><p>Cada combinacao categorica observada na base vira um mundo possivel <strong>w</strong>. O programa cria uma variavel <strong>x<sub>w</sub></strong> para representar a massa de probabilidade daquele mundo.</p><div class="constraint-list"><code>x<sub>w</sub> >= 0, para todo w em W</code><code>|W| = ${variableCount}</code><code>sum<sub>w em W</sub> x<sub>w</sub> = 1</code></div></section>`,
+    `<section class="math-block"><h3>3. Evidencias empiricas</h3><p>As frequencias da base nao sao apresentadas como regras automaticamente. Elas entram no programa linear como restricoes intervalares para eventos observados.</p><div class="constraint-list"><code>P(A): ${intervalText(result.pA)}</code><code>P(B): ${intervalText(result.pB)}</code><code>P(A e B): ${intervalText(result.pAB)}</code><code>L <= sum(x<sub>w</sub> onde evento) <= U</code></div></section>`,
+    `<section class="math-block"><h3>4. Regras liberadas</h3><p>Suporte, confianca e lift pertencem a ferramenta de extracao de regras. A interface so mostra esses tres valores quando a regra consultada foi gerada e liberada pelo minerador.</p><div class="constraint-list"><code>suporte(R -> S) = P(R e S)</code><code>confianca(R -> S) = P(S | R)</code><code>lift(R -> S) = confianca / P(S)</code>${releasedRuleText}</div></section>`,
+    `<section class="math-block"><h3>5. Regras no PL</h3><p>Antes da consulta, o sistema minera regras gerais do dataset e incorpora as melhores como conhecimento aprendido. Quando a consulta B -> A tambem foi liberada, ela entra como restricao de confianca; caso contrario, ela continua sendo uma pergunta, mas nao vira metrica de regra.</p><div class="constraint-list"><code>limiares: suporte >= 0.010; confianca >= 0.200; lift >= 1.050</code><code>L <= P(R e S) / P(R) <= U</code><code>P(R e S) - U.P(R) <= 0</code><code>-P(R e S) + L.P(R) <= 0</code>${learnedRuleItems}</div></section>`,
+    `<section class="math-block"><h3>6. Consulta condicional</h3><p>A pergunta final continua sendo probabilistica: qual intervalo e possivel para A quando B ocorre, respeitando as evidencias da base e as regras liberadas?</p><code>P(A | B) = P(A e B) / P(B) = sum(x<sub>w</sub> onde ${abLabel}) / sum(x<sub>w</sub> onde ${bLabel})</code></section>`,
+    `<section class="math-block"><h3>7. Charnes-Cooper</h3><p>Como P(A | B) e uma razao, o modelo aplica Charnes-Cooper para transformar o problema fracionario em programacao linear.</p><div class="constraint-list"><code>y<sub>w</sub> = x<sub>w</sub> / P(B)</code><code>t = 1 / P(B)</code><code>sum(y<sub>w</sub> onde B) = 1</code><code>A y - b t <= 0</code><code>sum<sub>w em W</sub> y<sub>w</sub> - t = 0</code></div></section>`,
+    `<section class="math-block"><h3>8. Solver</h3><p>O HiGHS resolve dois programas lineares: um minimiza e outro maximiza a massa dos mundos que satisfazem A e B. O resultado nao e um unico chute, mas um intervalo compativel com as restricoes.</p><div class="constraint-list"><code>min sum(y<sub>w</sub> onde ${abLabel})</code><code>max sum(y<sub>w</sub> onde ${abLabel})</code><code>restricoes lineares: ${constraintCount}</code></div><p><strong>Resultado:</strong> ${interval}.</p></section>`,
   ].join("");
 }
 
@@ -323,7 +329,7 @@ async function runQuery() {
       : "";
     const releasedRuleNotice = releasedRule
       ? `<div><strong>Regra liberada encontrada:</strong> os cards usam suporte, confianca e lift fornecidos pela ferramenta de extracao de regras.</div>`
-      : `<div><strong>Sem regra liberada:</strong> a ferramenta de extracao avaliou esta consulta, mas nao liberou a regra. Por isso suporte, confianca e lift ficam sem valor nos cards.</div>`;
+      : `<div><strong>Sem regra liberada:</strong> a ferramenta de extracao nao gerou/liberou uma regra exatamente igual a esta consulta. Por isso suporte, confianca e lift ficam sem valor nos cards.</div>`;
     const ruleMetricContent = releasedRule
       ? [
           `<div><strong>Suporte:</strong> ${fmt(releasedRule.support)} fornecido pela regra liberada.</div>`,
@@ -372,7 +378,7 @@ async function runQuery() {
       ruleMetricContent,
       queriedRuleContent,
       `<div class="learned-rules-block"><strong>Regras aprendidas no PL:</strong> ${learnedRuleContent}</div>`,
-      `<div><strong>Marginais:</strong> P(A)=${fmt(result.pA)} e P(B)=${fmt(result.pB)}.</div>`,
+      `<div><strong>Evidencias empiricas usadas no PL:</strong> P(A)=${fmt(result.pA)}, P(B)=${fmt(result.pB)} e P(A e B)=${fmt(result.pAB)}.</div>`,
       linearInterval,
       `<div><strong>Conclusao:</strong> ${conclusionContent}</div>`,
     ].join("");

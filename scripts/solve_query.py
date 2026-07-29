@@ -190,19 +190,6 @@ def event_key(conditions: list[dict[str, str]]) -> str:
     return ", ".join(f"{item['attribute']}={item['value']}" for item in conditions)
 
 
-def association_rule_is_valid(
-    rows: list[dict[str, str]],
-    antecedent: list[dict[str, str]],
-    consequent: list[dict[str, str]],
-) -> bool:
-    p_antecedent = probability(rows, antecedent)
-    if p_antecedent <= 0:
-        return False
-    p_both = probability(rows, [*antecedent, *consequent])
-    confidence = p_both / p_antecedent
-    return p_both > MIN_ASSOCIATION_SUPPORT and confidence > MIN_ASSOCIATION_CONFIDENCE
-
-
 def condition_signature(conditions: list[dict[str, str]]) -> tuple[tuple[str, str], ...]:
     return tuple(sorted((item["attribute"], item["value"]) for item in conditions))
 
@@ -262,6 +249,22 @@ def mine_association_rules(
     return rules[:max_rules]
 
 
+def find_released_association_rule(
+    rules: list[dict[str, Any]],
+    antecedent: list[dict[str, str]],
+    consequent: list[dict[str, str]],
+) -> dict[str, Any] | None:
+    antecedent_signature = condition_signature(antecedent)
+    consequent_signature = condition_signature(consequent)
+    for rule in rules:
+        if (
+            condition_signature(rule["antecedent"]) == antecedent_signature
+            and condition_signature(rule["consequent"]) == consequent_signature
+        ):
+            return rule
+    return None
+
+
 def build_linear_constraints(
     data: dict[str, Any],
     target: dict[str, str],
@@ -289,26 +292,7 @@ def build_linear_constraints(
         b_ub.append(-lower)
         summary[kind] += 1
 
-    def add_confidence_rule(
-        kind: str,
-        antecedent: list[dict[str, str]],
-        consequent: list[dict[str, str]],
-    ) -> None:
-        if not association_rule_is_valid(rows, antecedent, consequent):
-            return
-        antecedent_probability = probability(rows, antecedent)
-        both = [*antecedent, *consequent]
-        confidence = probability(rows, both) / antecedent_probability
-        lower, upper = rounded_interval(confidence)
-        antecedent_mask = world_mask(worlds, antecedent)
-        both_mask = world_mask(worlds, both)
-        a_ub.append(add_vectors(both_mask, antecedent_mask, -upper))
-        b_ub.append(0.0)
-        a_ub.append(add_vectors([-item for item in both_mask], antecedent_mask, lower))
-        b_ub.append(0.0)
-        summary[kind] += 1
-
-    def add_learned_confidence_rule(rule: dict[str, Any]) -> None:
+    def add_released_confidence_rule(rule: dict[str, Any], kind: str = "learnedAssociationRule") -> None:
         antecedent = rule["antecedent"]
         consequent = rule["consequent"]
         both = [*antecedent, *consequent]
@@ -319,7 +303,7 @@ def build_linear_constraints(
         b_ub.append(0.0)
         a_ub.append(add_vectors([-item for item in both_mask], antecedent_mask, lower))
         b_ub.append(0.0)
-        summary["learnedAssociationRule"] += 1
+        summary[kind] += 1
 
     for attribute in data["attributes"]:
         for value in data["domains"][attribute]:
@@ -336,16 +320,17 @@ def build_linear_constraints(
                     ]
                     add_interval("pairwiseJoint", conditions, probability(rows, conditions))
 
-    for rule in mine_association_rules(rows, data["domains"]):
-        add_learned_confidence_rule(rule)
+    learned_rules = mine_association_rules(rows, data["domains"])
+    for rule in learned_rules:
+        add_released_confidence_rule(rule)
 
     both = [*base, target]
     add_interval("selected", [target], probability(rows, [target]))
     add_interval("selected", base, probability(rows, base))
     add_interval("selected", both, probability(rows, both))
-    before_selected_rule = summary["associationRule"]
-    add_confidence_rule("associationRule", base, [target])
-    summary["selectedAssociationRule"] = summary["associationRule"] - before_selected_rule
+    selected_released_rule = find_released_association_rule(learned_rules, base, [target])
+    if selected_released_rule is not None:
+        add_released_confidence_rule(selected_released_rule, "selectedAssociationRule")
     summary["associationRule"] = summary["learnedAssociationRule"] + summary["selectedAssociationRule"]
 
     return a_ub, b_ub, summary
@@ -444,21 +429,35 @@ def linear_program_text(
     numerator = f"soma(x_w onde {event_key([*base, target])})"
     denominator = f"soma(x_w onde {event_key(base)})"
     lines = [
-        "Variaveis:",
-        "  x_w >= 0 para cada mundo possivel w da base categorizada",
+        "MODELO MATEMATICO DA CONSULTA",
         "",
-        "Restricao de normalizacao:",
+        "1. Eventos da consulta:",
+        f"  A = {event_key([target])}",
+        f"  B = {event_key(base)}",
+        f"  A e B = {event_key([*base, target])}",
+        "",
+        "2. Variaveis:",
+        "  Cada mundo possivel w e uma combinacao categorica observada no dataset.",
+        "  x_w >= 0 representa a massa de probabilidade atribuida ao mundo w.",
+        "",
+        "3. Normalizacao probabilistica:",
         "  soma(x_w) = 1",
         "",
-        "Restricoes extraidas da base:",
+        "4. Evidencias empiricas usadas como restricoes intervalares:",
         f"  {i_a[0]:.3f} <= P(A) = soma(x_w onde {event_key([target])}) <= {i_a[1]:.3f}",
         f"  {i_b[0]:.3f} <= P(B) = {denominator} <= {i_b[1]:.3f}",
         f"  {i_ab[0]:.3f} <= P(A e B) = {numerator} <= {i_ab[1]:.3f}",
+        "  Observacao: P(A e B) e evidencia empirica do PL; nao e exibido como suporte da regra se a extracao nao liberar B -> A.",
         "",
-        "Consulta:",
+        "5. Regras de associacao:",
+        "  O minerador gera regras R -> S e retorna suporte, confianca e lift.",
+        "  O PL consome esses valores quando a regra foi liberada pela extracao.",
+        "  Se B -> A nao foi liberada, suporte, confianca e lift da consulta ficam sem valor.",
+        "",
+        "6. Consulta condicional:",
         "  P(A | B) = P(A e B) / P(B)",
         "",
-        "Resolucao linear:",
+        "7. Resolucao linear:",
         "  A razao P(A e B) / P(B) e convertida por Charnes-Cooper:",
         "  x_w = y_w / t",
         "  P(B) em y e fixado como 1",
@@ -532,10 +531,11 @@ def conclusion_text(
         )
 
     return (
-        f"Para a regra {base_label} -> {target_label}, foram encontrados {count_both} "
-        f"casos favoraveis dentro de {count_base} casos que satisfazem B. A confianca "
-        f"empirica e {confidence:.3f}, considerada {confidence_label}, e o suporte e "
-        f"{support:.3f}. {lift_sentence}{interval_sentence}"
+        f"Para a regra liberada {base_label} -> {target_label}, a ferramenta de extracao "
+        f"retornou confianca {confidence:.3f}, considerada {confidence_label}, suporte "
+        f"{support:.3f} e lift {lift:.3f}. Na base, foram encontrados {count_both} "
+        f"casos favoraveis dentro de {count_base} casos que satisfazem B. "
+        f"{lift_sentence}{interval_sentence}"
     )
 
 
@@ -553,10 +553,13 @@ def compute_query(
     p_a = probability(rows, [target])
     p_b = probability(rows, conditions)
     p_ab = probability(rows, both)
-    confidence = p_ab / p_b if p_b > 0 else None
-    lift = confidence / p_a if confidence is not None and p_a > 0 else None
     count_both = probability_count(rows, both)
     count_base = probability_count(rows, conditions)
+    learned_rules = mine_association_rules(rows, data["domains"])
+    released_rule = find_released_association_rule(learned_rules, conditions, [target])
+    rule_support = released_rule["support"] if released_rule else None
+    rule_confidence = released_rule["confidence"] if released_rule else None
+    rule_lift = released_rule["lift"] if released_rule else None
     lp = solve_linear_interval(data, target, conditions, solver_method, solver_name)
     finished_at = datetime.now(timezone.utc)
     duration_seconds = time.perf_counter() - started_perf
@@ -570,9 +573,10 @@ def compute_query(
         },
         "target": target,
         "conditions": conditions,
-        "support": p_ab,
-        "confidence": confidence,
-        "lift": lift,
+        "support": rule_support,
+        "confidence": rule_confidence,
+        "lift": rule_lift,
+        "pAB": p_ab,
         "pA": p_a,
         "pB": p_b,
         "countBoth": count_both,
@@ -580,7 +584,15 @@ def compute_query(
         "total": data["total"],
         "linear": lp,
         "linearProgram": linear_program_text(target, conditions, p_a, p_b, p_ab, lp),
-        "conclusion": conclusion_text(target, conditions, p_ab, confidence, lift, p_b, count_base, count_both, lp),
+        "conclusion": (
+            conclusion_text(target, conditions, rule_support, rule_confidence, rule_lift, p_b, count_base, count_both, lp)
+            if released_rule
+            else (
+                f"Para a regra {event_key(conditions)} -> {event_key([target])}, a ferramenta de extracao "
+                "nao liberou uma regra correspondente. Por isso suporte, confianca e lift nao sao "
+                "informados como metricas de regra."
+            )
+        ),
     }
 
 

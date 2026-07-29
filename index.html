@@ -12,7 +12,7 @@
         <header class="topbar">
           <div>
             <h1>Probabilidades do Solo</h1>
-            <p>Consulta categórica, regras de associação e formulação linear sobre o dataset treinado.</p>
+            <p>Consulta categórica, regras de associação liberadas pela extração e programação linear sobre o dataset treinado.</p>
           </div>
           <div class="dataset-status" id="datasetStatus">Carregando dataset...</div>
         </header>
@@ -52,11 +52,11 @@
 
         <section class="results-grid">
           <article class="metric-card">
-            <span>Suporte P(A e B)</span>
+            <span>Suporte da regra</span>
             <strong id="supportValue">-</strong>
           </article>
           <article class="metric-card">
-            <span>Confiança P(A | B)</span>
+            <span>Confiança da regra</span>
             <strong id="confidenceValue">-</strong>
           </article>
           <article class="metric-card">
@@ -115,7 +115,7 @@
           </div>
           <div class="tab-panel is-active" id="linearPanel" role="tabpanel" aria-labelledby="linearTab">
             <div class="formulation-note">
-              Este painel mostra o resumo do programa linear da consulta. Clique em <strong>Gerar e baixar LP em TXT</strong> para criar o arquivo completo, incluindo marginais, conjuntas por pares, regras de associa&ccedil;&atilde;o, transforma&ccedil;&atilde;o de Charnes-Cooper e objetivos do solver.
+              Este painel mostra o resumo do programa linear da consulta. Clique em <strong>Gerar e baixar LP em TXT</strong> para criar o arquivo completo, incluindo evid&ecirc;ncias emp&iacute;ricas, regras liberadas pela extra&ccedil;&atilde;o, transforma&ccedil;&atilde;o de Charnes-Cooper e objetivos do solver.
             </div>
             <pre class="lp-box" id="linearProgram"></pre>
           </div>

@@ -58,10 +58,10 @@ python scripts/solve_query.py --target label=rice --condition ph=acido --conditi
 
 O script retorna:
 
-- probabilidades `P(A)`, `P(B)` e `P(A e B)`
-- suporte
-- confianca/precisao
-- lift
+- probabilidades empiricas `P(A)`, `P(B)` e `P(A e B)` usadas no PL
+- suporte da regra liberada, quando a extracao gerar a regra consultada
+- confianca/precisao da regra liberada, quando existir
+- lift da regra liberada, quando existir
 - intervalo linear minimo e maximo
 - numero de variaveis e restricoes
 - tempo de processamento
@@ -72,6 +72,29 @@ O script retorna:
 
 As probabilidades foram representadas por intervalos para reduzir efeitos de
 arredondamento e permitir modelagem consistente das restricoes lineares.
+
+## Visao geral matematica do projeto
+
+O projeto combina tres camadas:
+
+1. Evidencia empirica do dataset
+
+A base fornece frequencias observadas, como `P(A)`, `P(B)` e `P(A e B)`.
+Esses valores sao transformados em restricoes intervalares do programa linear.
+
+2. Regras de associacao liberadas pela extracao
+
+O minerador de regras gera regras do tipo `R -> S` e, para cada regra aceita,
+retorna suporte, confianca e lift. O programa principal nao inventa esses
+valores para qualquer consulta; ele apenas consome os valores das regras que
+foram liberadas.
+
+3. Programacao linear para a consulta condicional
+
+A pergunta do usuario continua sendo `P(A | B)`. Como essa probabilidade e uma
+razao, o projeto usa Charnes-Cooper para transformar a consulta em dois
+problemas lineares: um de minimo e outro de maximo. O resultado e um intervalo
+de valores possiveis para `P(A | B)`.
 
 ## Topicos usados para construir o codigo
 
@@ -121,8 +144,13 @@ P(A e B)   = count(A e B) / N
 P(A | B)   = P(A e B) / P(B)
 ```
 
-Essas probabilidades sao usadas tanto para mostrar as metricas na interface
-quanto para montar as restricoes do programa linear.
+Essas probabilidades sao evidencias da base. Elas montam as restricoes do
+programa linear e ajudam a responder a consulta condicional, mas nao substituem
+a saida da ferramenta de extracao de regras.
+
+No resultado do sistema, `P(A e B)` fica separado como probabilidade empirica.
+Os campos `suporte`, `confianca` e `lift` so recebem valor quando a regra
+`B -> A` foi efetivamente gerada e liberada pelo minerador de regras.
 
 5. Regras de associacao
 
@@ -138,17 +166,20 @@ No projeto, isso significa:
 se condicoes do solo ocorrem, entao determinada cultura e provavel
 ```
 
-O sistema calcula:
+Na teoria de regras de associacao, as medidas sao:
 
 ```text
-suporte     = P(A e B)
-confianca   = P(A | B)
-lift        = P(A | B) / P(A)
+suporte(B -> A)   = P(B e A)
+confianca(B -> A) = P(A | B)
+lift(B -> A)      = confianca(B -> A) / P(A)
 ```
 
-Uma regra com suporte conjunto zero nao e considerada uma regra aprendida. Ela
-continua aparecendo como consulta do usuario, mas nao entra como restricao ativa
-de confianca no programa linear, porque nao ha evidencia empirica para sustenta-la.
+No projeto, essas tres medidas nao sao recalculadas pela tela como se toda
+consulta fosse uma regra valida. Elas pertencem a saida do minerador de regras.
+Se a regra consultada `B -> A` nao estiver entre as regras liberadas, a
+interface mostra suporte, confianca e lift como `-`. Mesmo assim, a pergunta
+probabilistica continua sendo resolvida pelo PL usando `P(A)`, `P(B)` e
+`P(A e B)` como evidencias empiricas.
 
 5.1. Como as regras sao aprendidas
 
@@ -241,8 +272,8 @@ O modelo inclui:
 - restricoes conjuntas por pares de valores;
 - restricoes especificas da consulta selecionada;
 - restricoes das 3 melhores regras de associacao aprendidas do dataset;
-- restricao da regra de associacao selecionada quando ela possui suporte e
-  confianca positivos.
+- restricao da regra de associacao selecionada somente quando `B -> A` foi
+  liberada pela extracao de regras.
 
 7. Consulta condicional
 
@@ -321,8 +352,9 @@ A comparacao verifica se os resultados batem em:
 - `P(A)`;
 - `P(B)`;
 - `P(A e B)`;
-- confianca;
-- lift;
+- suporte da regra liberada;
+- confianca da regra liberada;
+- lift da regra liberada;
 - limite inferior do programa linear;
 - limite superior do programa linear;
 - quantidade de variaveis;
@@ -373,12 +405,13 @@ arredondamento, discretizacao e pequenas variacoes numericas. Ao usar limites
 inferior e superior, o sistema evita tratar uma frequencia observada como um
 valor absolutamente rigido.
 
-As regras de associacao entram como interpretacao estatistica da consulta
-`B -> A`. Suporte mede a frequencia conjunta, confianca mede a probabilidade
-condicional e lift compara a regra com a ocorrencia geral do consequente. Quando
-uma regra tem suporte zero, ela nao e inserida como restricao de confianca,
-porque uma restricao desse tipo representaria conhecimento que o dataset nao
-aprendeu.
+As regras de associacao entram como conhecimento aprendido pelo minerador.
+Suporte mede a frequencia conjunta da regra liberada, confianca mede a
+probabilidade condicional da regra e lift compara essa confianca com a ocorrencia
+geral do consequente. Quando a consulta `B -> A` nao aparece entre as regras
+liberadas, o sistema nao recalcula suporte, confianca e lift para preencher os
+cards; ele mostra esses campos sem valor e resolve apenas a consulta
+probabilistica pelo PL.
 
 Por fim, a transformacao de Charnes-Cooper e usada porque `P(A | B)` e uma
 fracao. Como `linprog` resolve programacao linear, a razao precisa ser

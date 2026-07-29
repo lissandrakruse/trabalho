@@ -310,53 +310,6 @@ def association_rule_status(
     }
 
 
-def extracted_rule_result(
-    rows: list[dict[str, str]],
-    antecedent: list[dict[str, str]],
-    consequent: list[dict[str, str]],
-) -> dict[str, Any]:
-    status = association_rule_status(rows, antecedent, consequent)
-    support = status["pBoth"]
-    confidence = status["confidence"]
-    lift = status["lift"]
-    released = (
-        support >= MIN_LEARNED_RULE_SUPPORT
-        and confidence is not None
-        and confidence >= MIN_LEARNED_RULE_CONFIDENCE
-        and lift is not None
-        and lift >= MIN_LEARNED_RULE_LIFT
-    )
-    if released:
-        release_reason = "liberada pela extracao de regras"
-    elif status["pAntecedent"] <= 0:
-        release_reason = "rejeitada: antecedente com probabilidade zero"
-    elif support < MIN_LEARNED_RULE_SUPPORT:
-        release_reason = f"rejeitada: suporte abaixo de {MIN_LEARNED_RULE_SUPPORT:.3f}"
-    elif confidence is None or confidence < MIN_LEARNED_RULE_CONFIDENCE:
-        release_reason = f"rejeitada: confianca abaixo de {MIN_LEARNED_RULE_CONFIDENCE:.3f}"
-    elif lift is None or lift < MIN_LEARNED_RULE_LIFT:
-        release_reason = f"rejeitada: lift abaixo de {MIN_LEARNED_RULE_LIFT:.3f}"
-    else:
-        release_reason = "rejeitada pelos limiares da extracao"
-
-    return {
-        "antecedent": antecedent,
-        "consequent": consequent,
-        "support": support,
-        "confidence": confidence,
-        "lift": lift,
-        "released": released,
-        "reason": release_reason,
-        "pAntecedent": status["pAntecedent"],
-        "pConsequent": status["pConsequent"],
-        "thresholds": {
-            "support": MIN_LEARNED_RULE_SUPPORT,
-            "confidence": MIN_LEARNED_RULE_CONFIDENCE,
-            "lift": MIN_LEARNED_RULE_LIFT,
-        },
-    }
-
-
 def condition_signature(conditions: list[dict[str, str]]) -> tuple[tuple[str, str], ...]:
     return tuple(sorted((item["attribute"], item["value"]) for item in conditions))
 
@@ -450,6 +403,39 @@ def find_released_association_rule(
     return None
 
 
+def association_rule_payload(
+    rule: dict[str, Any] | None,
+    antecedent: list[dict[str, str]],
+    consequent: list[dict[str, str]],
+) -> dict[str, Any]:
+    thresholds = {
+        "support": MIN_LEARNED_RULE_SUPPORT,
+        "confidence": MIN_LEARNED_RULE_CONFIDENCE,
+        "lift": MIN_LEARNED_RULE_LIFT,
+    }
+    if rule is None:
+        return {
+            "antecedent": antecedent,
+            "consequent": consequent,
+            "support": None,
+            "confidence": None,
+            "lift": None,
+            "released": False,
+            "reason": "regra nao gerada pela extracao de regras",
+            "thresholds": thresholds,
+        }
+    return {
+        "antecedent": rule["antecedent"],
+        "consequent": rule["consequent"],
+        "support": rule["support"],
+        "confidence": rule["confidence"],
+        "lift": rule["lift"],
+        "released": True,
+        "reason": "liberada pela extracao de regras",
+        "thresholds": thresholds,
+    }
+
+
 def add_vectors(left: list[float], right: list[float], right_scale: float = 1.0) -> list[float]:
     return [left_item + right_scale * right_item for left_item, right_item in zip(left, right)]
 
@@ -487,45 +473,7 @@ def build_linear_constraints(
             }
         )
 
-    def add_confidence_rule(
-        kind: str,
-        antecedent: list[dict[str, str]],
-        consequent: list[dict[str, str]],
-    ) -> None:
-        status = association_rule_status(rows, antecedent, consequent)
-        if not status["accepted"]:
-            return
-        antecedent_probability = status["pAntecedent"]
-        both = [*antecedent, *consequent]
-        confidence = status["confidence"]
-        lower, upper = rounded_interval(confidence)
-        antecedent_mask = world_mask(worlds, antecedent)
-        both_mask = world_mask(worlds, both)
-
-        # P(A e B) / P(B) <= upper  ->  P(A e B) - upper P(B) <= 0
-        a_ub.append(add_vectors(both_mask, antecedent_mask, -upper))
-        b_ub.append(0.0)
-
-        # P(A e B) / P(B) >= lower  -> -P(A e B) + lower P(B) <= 0
-        a_ub.append(add_vectors([-item for item in both_mask], antecedent_mask, lower))
-        b_ub.append(0.0)
-
-        records.append(
-            {
-                "kind": kind,
-                "antecedent": antecedent,
-                "consequent": consequent,
-                "lower": lower,
-                "upper": upper,
-                "value": confidence,
-                "expression": (
-                    f"{lower:.3f} <= {mask_expression(both)} / "
-                    f"{mask_expression(antecedent)} <= {upper:.3f}"
-                ),
-            }
-        )
-
-    def add_learned_confidence_rule(rule: dict[str, Any]) -> None:
+    def add_released_confidence_rule(rule: dict[str, Any], kind: str = "learned_association_rule") -> None:
         antecedent = rule["antecedent"]
         consequent = rule["consequent"]
         both = [*antecedent, *consequent]
@@ -539,7 +487,7 @@ def build_linear_constraints(
         b_ub.append(0.0)
         records.append(
             {
-                "kind": "learned_association_rule",
+                "kind": kind,
                 "antecedent": antecedent,
                 "consequent": consequent,
                 "lower": lower,
@@ -572,13 +520,15 @@ def build_linear_constraints(
 
     learned_rules = list(learned_association_rules())
     for rule in learned_rules:
-        add_learned_confidence_rule(rule)
+        add_released_confidence_rule(rule)
 
     both = [*base, target]
     add_interval("selected_target", [target], probability(rows, [target]))
     add_interval("selected_base", base, probability(rows, base))
     add_interval("selected_joint", both, probability(rows, both))
-    add_confidence_rule("selected_association_rule", base, [target])
+    selected_released_rule = find_released_association_rule(learned_rules, base, [target])
+    if selected_released_rule is not None:
+        add_released_confidence_rule(selected_released_rule, "selected_association_rule")
 
     return a_ub, b_ub, records
 
@@ -709,22 +659,35 @@ def linear_program_text(
     numerator = f"soma(x_w onde {event_key([*base, target])})"
     denominator = f"soma(x_w onde {event_key(base)})"
     lines = [
-        "Variaveis:",
-        "  x_w >= 0 para cada mundo possivel w da base categorizada",
+        "MODELO MATEMATICO DA CONSULTA",
         "",
-        "Restricao de normalizacao:",
+        "1. Eventos da consulta:",
+        f"  A = {event_key([target])}",
+        f"  B = {event_key(base)}",
+        f"  A e B = {event_key([*base, target])}",
+        "",
+        "2. Variaveis:",
+        "  Cada mundo possivel w e uma combinacao categorica observada no dataset.",
+        "  x_w >= 0 representa a massa de probabilidade atribuida ao mundo w.",
+        "",
+        "3. Normalizacao probabilistica:",
         "  soma(x_w) = 1",
         "",
-        "Resumo das restricoes extraidas da base (nao e a lista completa):",
+        "4. Evidencias empiricas usadas como restricoes intervalares:",
         f"  {i_a[0]:.3f} <= P(A) = soma(x_w onde {event_key([target])}) <= {i_a[1]:.3f}",
         f"  {i_b[0]:.3f} <= P(B) = {denominator} <= {i_b[1]:.3f}",
         f"  {i_ab[0]:.3f} <= P(A e B) = {numerator} <= {i_ab[1]:.3f}",
-        "  Observacao: gere o LP completo para ver marginais, conjuntas por pares e regra de associacao selecionada.",
+        "  Observacao: P(A e B) e evidencia empirica do PL; nao e exibido como suporte da regra se a extracao nao liberar B -> A.",
         "",
-        "Consulta:",
+        "5. Regras de associacao:",
+        "  O minerador gera regras R -> S e retorna suporte, confianca e lift.",
+        "  O PL consome esses valores quando a regra foi liberada pela extracao.",
+        "  Se B -> A nao foi liberada, suporte, confianca e lift da consulta ficam sem valor.",
+        "",
+        "6. Consulta condicional:",
         "  P(A | B) = P(A e B) / P(B)",
         "",
-        "Resolucao linear:",
+        "7. Resolucao linear:",
         "  A razao P(A e B) / P(B) e convertida por Charnes-Cooper:",
         "  x_w = y_w / t",
         "  P(B) em y e fixado como 1",
@@ -777,6 +740,14 @@ def full_linear_program_text(
         "",
         f"Consulta: P({event_key([target])} | {event_key(base)})",
         f"Mundos possiveis observados: {len(worlds)}",
+        "",
+        "LEITURA DO PROJETO",
+        "",
+        "1. O dataset e categorizado para permitir consultas logicas sobre atributos e valores.",
+        "2. Cada combinacao observada vira um mundo possivel com uma variavel x_w.",
+        "3. Frequencias empiricas viram restricoes intervalares do programa linear.",
+        "4. Regras de associacao so fornecem suporte, confianca e lift quando sao liberadas pela extracao.",
+        "5. A consulta P(A | B) e resolvida por Charnes-Cooper e HiGHS.",
         "",
         "Variaveis originais:",
         "  x_w >= 0 para cada mundo possivel w",
@@ -856,16 +827,32 @@ def full_linear_program_text(
             "",
             "REGRAS DE ASSOCIACAO LIGADAS A CONSULTA",
             "",
-            "Regra candidata selecionada B -> A:",
-            f"  {association_rule_description(rows, base, [target])}",
+            "Regra consultada B -> A:",
+            f"  {event_key(base)} -> {event_key([target])}",
         ]
     )
-    selected_rule_status = association_rule_status(rows, base, [target])
-    lines.append(f"  Status no programa linear: {selected_rule_status['reason']}.")
+    released_rule = find_released_association_rule(learned_rules, base, [target])
+    if released_rule is None:
+        lines.extend(
+            [
+                "  Status: nao liberada pela extracao de regras.",
+                "  Suporte, confianca e lift nao sao recalculados pelo programa para esta regra.",
+                "  A consulta continua usando P(A), P(B) e P(A e B) como evidencias do PL.",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                "  Status: liberada pela extracao de regras.",
+                f"  suporte={released_rule['support']:.3f}, confianca={released_rule['confidence']:.3f}, lift={released_rule['lift']:.3f}",
+                "  A confianca liberada vira restricao linear ativa.",
+            ]
+        )
     lines.extend(
         [
             "",
-            "Regras B -> A para todos os valores possiveis do atributo alvo:",
+            "Diagnostico empirico B -> A para todos os valores possiveis do atributo alvo:",
+            "  Estes valores ajudam a auditar a base, mas nao substituem a saida da extracao de regras.",
         ]
     )
     for value in target_values:
@@ -975,10 +962,11 @@ def conclusion_text(
         )
 
     return (
-        f"Para a regra {base_label} -> {target_label}, foram encontrados {count_both} "
-        f"casos favoraveis dentro de {count_base} casos que satisfazem B. A confianca "
-        f"empirica e {confidence:.3f}, considerada {confidence_label}, e o suporte e "
-        f"{support:.3f}. {lift_sentence}{interval_sentence}"
+        f"Para a regra liberada {base_label} -> {target_label}, a ferramenta de extracao "
+        f"retornou confianca {confidence:.3f}, considerada {confidence_label}, suporte "
+        f"{support:.3f} e lift {lift:.3f}. Na base, foram encontrados {count_both} "
+        f"casos favoraveis dentro de {count_base} casos que satisfazem B. "
+        f"{lift_sentence}{interval_sentence}"
     )
 
 
@@ -1077,19 +1065,28 @@ def compute_query(
     p_a = probability(rows, [target])
     p_b = probability(rows, base)
     p_ab = probability(rows, both)
-    confidence = p_ab / p_b if p_b > 0 else None
-    lift = confidence / p_a if confidence is not None and p_a > 0 else None
     count_a = probability_count(rows, [target])
     count_both = probability_count(rows, both)
     count_base = probability_count(rows, base)
     learned_rules = list(learned_association_rules())
-    queried_rule = extracted_rule_result(rows, base, [target])
-    released_rule = queried_rule if queried_rule["released"] else find_released_association_rule(learned_rules, base, [target])
+    released_rule = find_released_association_rule(learned_rules, base, [target])
+    queried_rule = association_rule_payload(released_rule, base, [target])
+    rule_support = released_rule["support"] if released_rule else None
+    rule_confidence = released_rule["confidence"] if released_rule else None
+    rule_lift = released_rule["lift"] if released_rule else None
     lp = solve_linear_interval(data["worlds"], rows, target, base, solver_method, solver_name)
     classification = classification_metrics(count_a, count_base, count_both, data["total"])
     finished_at = datetime.now(timezone.utc)
     duration_seconds = time.perf_counter() - started_perf
-    conclusion = conclusion_text(target, base, p_ab, confidence, lift, p_b, count_base, count_both, lp)
+    conclusion = (
+        conclusion_text(target, base, rule_support, rule_confidence, rule_lift, p_b, count_base, count_both, lp)
+        if released_rule
+        else (
+            f"Para a regra {event_key(base)} -> {event_key([target])}, a ferramenta de extracao "
+            "nao liberou uma regra correspondente. Por isso suporte, confianca e lift nao sao "
+            "informados como metricas de regra."
+        )
+    )
 
     return {
         "ok": True,
@@ -1101,9 +1098,10 @@ def compute_query(
         },
         "target": target,
         "conditions": base,
-        "support": p_ab,
-        "confidence": confidence,
-        "lift": lift,
+        "support": rule_support,
+        "confidence": rule_confidence,
+        "lift": rule_lift,
+        "pAB": p_ab,
         "pA": p_a,
         "pB": p_b,
         "countBoth": count_both,
@@ -1123,15 +1121,7 @@ def compute_query(
         ],
         "queriedAssociationRule": queried_rule,
         "releasedAssociationRule": (
-            {
-                "antecedent": released_rule["antecedent"],
-                "consequent": released_rule["consequent"],
-                "support": released_rule["support"],
-                "confidence": released_rule["confidence"],
-                "lift": released_rule["lift"],
-                "released": released_rule.get("released", True),
-                "reason": released_rule.get("reason", "liberada pela extracao de regras"),
-            }
+            association_rule_payload(released_rule, base, [target])
             if released_rule
             else None
         ),
@@ -1161,7 +1151,7 @@ def compare_number(main_value: float | int | None, solver_value: float | int | N
 
 
 def compare_solver_result(main_result: dict[str, Any], solver_result: dict[str, Any]) -> dict[str, Any]:
-    fields = ["pA", "pB", "support", "confidence", "lift", "countBoth", "countBase"]
+    fields = ["pA", "pB", "pAB", "support", "confidence", "lift", "countBoth", "countBase"]
     metrics = {
         field: compare_number(main_result.get(field), solver_result.get(field))
         for field in fields
@@ -1462,8 +1452,9 @@ def write_query_report(result: dict[str, Any]) -> None:
                 ["Metrica", "Valor"],
                 ["P(A)", format_report_probability(result["pA"])],
                 ["P(B)", format_report_probability(result["pB"])],
-                ["Suporte P(A e B)", format_report_probability(result["support"])],
-                ["Confianca P(A | B)", format_report_probability(result["confidence"])],
+                ["P(A e B) usado no PL", format_report_probability(result["pAB"])],
+                ["Suporte da regra liberada", format_report_probability(result["support"])],
+                ["Confianca da regra liberada", format_report_probability(result["confidence"])],
                 ["Lift", format_report_number(result["lift"])],
                 ["Instancias", f"{result['countBoth']} / {result['countBase']}"],
                 ["Intervalo linear", interval],
@@ -1558,8 +1549,9 @@ def write_solver_comparison_report(result: dict[str, Any]) -> None:
     labels = {
         "pA": "P(A)",
         "pB": "P(B)",
-        "support": "P(A e B)",
-        "confidence": "Confianca P(A | B)",
+        "pAB": "P(A e B) usado no PL",
+        "support": "Suporte da regra",
+        "confidence": "Confianca da regra",
         "lift": "Lift",
         "countBoth": "Casos A e B",
         "countBase": "Casos B",

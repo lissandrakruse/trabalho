@@ -34,11 +34,13 @@ def run_default_query() -> int:
 
     print("Solver executado com sucesso.")
     print("Consulta padrao: P(label=rice | ph=acido, rainfall=alto)")
-    print(f"Suporte P(A e B): {result['support']:.3f}")
+    support = result["support"]
+    print(f"Suporte da regra: {support:.3f}" if support is not None else "Suporte da regra: -")
     confidence = result["confidence"]
     lift = result["lift"]
-    print(f"Confianca P(A | B): {confidence:.3f}" if confidence is not None else "Confianca P(A | B): -")
+    print(f"Confianca da regra: {confidence:.3f}" if confidence is not None else "Confianca da regra: -")
     print(f"Lift: {lift:.3f}" if lift is not None else "Lift: -")
+    print(f"Probabilidade empirica P(A e B) usada no PL: {result['pAB']:.3f}")
 
     linear = result["linear"]
     if linear.get("ok"):
