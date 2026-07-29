@@ -266,6 +266,40 @@ select {
   line-height: 1.5;
 }
 
+.classification-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  color: #27343c;
+}
+
+.classification-grid article {
+  padding: 12px;
+  border: 1px solid #dbe5e9;
+  border-radius: 8px;
+  background: #f7faf9;
+}
+
+.classification-grid span {
+  display: block;
+  color: #60717c;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.classification-grid strong {
+  display: block;
+  margin-top: 6px;
+  color: #17352f;
+  font-size: 22px;
+}
+
+.classification-grid p {
+  grid-column: 1 / -1;
+  color: #43535d;
+  line-height: 1.45;
+}
+
 .solver-comparison {
   overflow-x: auto;
   color: #27343c;
@@ -427,7 +461,8 @@ select {
 
 .panel:nth-of-type(4),
 .panel:nth-of-type(5),
-.panel:nth-of-type(6) {
+.panel:nth-of-type(6),
+.panel:nth-of-type(7) {
   grid-column: 1 / -1;
 }
 
@@ -459,6 +494,7 @@ select {
 
   .tab-list,
   .math-model,
+  .classification-grid,
   .solver-demo-grid {
     grid-template-columns: 1fr;
   }

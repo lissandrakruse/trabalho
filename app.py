@@ -399,6 +399,42 @@ def conclusion_text(
     )
 
 
+def classification_metrics(
+    count_a: int,
+    count_b: int,
+    count_ab: int,
+    total: int,
+) -> dict[str, Any]:
+    true_positive = count_ab
+    false_positive = count_b - count_ab
+    false_negative = count_a - count_ab
+    true_negative = total - true_positive - false_positive - false_negative
+
+    precision = true_positive / (true_positive + false_positive) if true_positive + false_positive > 0 else None
+    recall = true_positive / (true_positive + false_negative) if true_positive + false_negative > 0 else None
+    accuracy = (true_positive + true_negative) / total if total > 0 else None
+    f1 = (
+        2 * precision * recall / (precision + recall)
+        if precision is not None and recall is not None and precision + recall > 0
+        else None
+    )
+
+    return {
+        "accuracy": accuracy,
+        "precision": precision,
+        "recall": recall,
+        "f1": f1,
+        "truePositive": true_positive,
+        "falsePositive": false_positive,
+        "falseNegative": false_negative,
+        "trueNegative": true_negative,
+        "interpretation": (
+            "A avaliacao trata a regra B -> A como um classificador binario: "
+            "quando B ocorre, o modelo prediz A; quando B nao ocorre, prediz nao A."
+        ),
+    }
+
+
 @app.get("/")
 def home():
     return send_from_directory(ROOT, "index.html")
@@ -456,9 +492,11 @@ def compute_query(payload: dict[str, Any]) -> dict[str, Any]:
     p_ab = probability(rows, both)
     confidence = p_ab / p_b if p_b > 0 else None
     lift = confidence / p_a if confidence is not None and p_a > 0 else None
+    count_a = probability_count(rows, [target])
     count_both = probability_count(rows, both)
     count_base = probability_count(rows, base)
     lp = solve_linear_interval(data["worlds"], rows, target, base)
+    classification = classification_metrics(count_a, count_base, count_both, data["total"])
     finished_at = datetime.now(timezone.utc)
     duration_seconds = time.perf_counter() - started_perf
     conclusion = conclusion_text(target, base, p_ab, confidence, lift, p_b, count_base, count_both, lp)
@@ -480,8 +518,10 @@ def compute_query(payload: dict[str, Any]) -> dict[str, Any]:
         "pB": p_b,
         "countBoth": count_both,
         "countBase": count_base,
+        "countA": count_a,
         "total": data["total"],
         "linear": lp,
+        "classification": classification,
         "linearProgram": linear_program_text(target, base, p_a, p_b, p_ab, lp),
         "conclusion": conclusion,
     }
@@ -722,6 +762,27 @@ def write_query_report(result: dict[str, Any]) -> None:
                 ["Duracao", f"{result['processing']['durationSeconds']:.3f} segundos"],
             ]
         ),
+        Spacer(1, 0.18 * cm),
+        Paragraph("Acuracia do modelo probabilistico", styles["Heading2"]),
+        table(
+            [
+                ["Metrica de classificacao", "Valor"],
+                ["Acuracia", format_report_probability(result["classification"]["accuracy"])],
+                ["Precisao", format_report_probability(result["classification"]["precision"])],
+                ["Recall", format_report_probability(result["classification"]["recall"])],
+                ["F1-score", format_report_probability(result["classification"]["f1"])],
+                [
+                    "Matriz binaria",
+                    (
+                        f"VP={result['classification']['truePositive']}, "
+                        f"FP={result['classification']['falsePositive']}, "
+                        f"FN={result['classification']['falseNegative']}, "
+                        f"VN={result['classification']['trueNegative']}"
+                    ),
+                ],
+            ]
+        ),
+        Paragraph(result["classification"]["interpretation"], body),
         Spacer(1, 0.18 * cm),
         Paragraph("Conclusao", styles["Heading2"]),
         Paragraph(result["conclusion"], body),

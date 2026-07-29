@@ -14,6 +14,7 @@ const confidenceValue = document.querySelector("#confidenceValue");
 const liftValue = document.querySelector("#liftValue");
 const countValue = document.querySelector("#countValue");
 const probabilityText = document.querySelector("#probabilityText");
+const classificationMetrics = document.querySelector("#classificationMetrics");
 const solverCompareStatus = document.querySelector("#solverCompareStatus");
 const solverDemo = document.querySelector("#solverDemo");
 const solverComparison = document.querySelector("#solverComparison");
@@ -191,6 +192,22 @@ function renderSolverComparison(result) {
   ].join("");
 }
 
+function renderClassificationMetrics(classification) {
+  if (!classification) {
+    classificationMetrics.innerHTML = "";
+    return;
+  }
+
+  classificationMetrics.innerHTML = [
+    `<article><span>Acuracia</span><strong>${fmt(classification.accuracy)}</strong></article>`,
+    `<article><span>Precisao</span><strong>${fmt(classification.precision)}</strong></article>`,
+    `<article><span>Recall</span><strong>${fmt(classification.recall)}</strong></article>`,
+    `<article><span>F1-score</span><strong>${fmt(classification.f1)}</strong></article>`,
+    `<p>${escapeHtml(classification.interpretation)}</p>`,
+    `<p>Matriz binaria: VP=${classification.truePositive}, FP=${classification.falsePositive}, FN=${classification.falseNegative}, VN=${classification.trueNegative}.</p>`,
+  ].join("");
+}
+
 function renderMathModel(result) {
   const aLabel = escapeHtml(eventLabel([result.target]));
   const bLabel = escapeHtml(eventLabel(result.conditions));
@@ -248,9 +265,11 @@ async function runQuery() {
       `<div><strong>Conclusão:</strong> ${result.conclusion}</div>`,
     ].join("");
     linearProgram.textContent = result.linearProgram;
+    renderClassificationMetrics(result.classification);
     renderMathModel(result);
   } catch (error) {
     probabilityText.innerHTML = `<div><strong>Erro:</strong> ${error.message}</div>`;
+    classificationMetrics.innerHTML = "";
     linearProgram.textContent = "";
     mathModel.innerHTML = "";
   } finally {
