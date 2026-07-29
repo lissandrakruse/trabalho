@@ -141,6 +141,7 @@ function setActiveTab(activeButton) {
 function renderSolverComparison(result) {
   const solverResult = result.standaloneSolver;
   const linear = solverResult.linear || {};
+  const timing = result.timing || {};
   const targetText = escapeHtml(eventLabel([solverResult.target]));
   const conditionsText = escapeHtml(eventLabel(solverResult.conditions));
   const intervalTextValue = linear.ok
@@ -162,7 +163,10 @@ function renderSolverComparison(result) {
   };
   const rows = Object.entries(result.comparison.metrics).map(([key, item]) => {
     const difference = item.difference === null ? "-" : Number(item.difference).toExponential(2);
-    const status = key === "durationSeconds" ? "Medido" : item.match ? "Igual" : "Diferente";
+    let status = item.match ? "Igual" : "Diferente";
+    if (key === "durationSeconds") {
+      status = timing.faster === "standaloneSolver" ? "Solver mais rapido" : timing.faster === "main" ? "Projeto mais rapido" : "Tempo equivalente";
+    }
     return `<tr><td>${labels[key] || key}</td><td>${fmtCompare(item.main)}</td><td>${fmtCompare(item.solver)}</td><td>${difference}</td><td>${status}</td></tr>`;
   });
 
@@ -177,6 +181,7 @@ function renderSolverComparison(result) {
     `<div><span>Restricoes</span><strong>${fmtCompare(linear.constraints)}</strong><small>marginais, conjunta e normalizacao</small></div>`,
     `</div>`,
     `<p>Resultado do solver separado: <strong>${intervalTextValue}</strong>. O painel abaixo compara esse resultado com o calculo principal do projeto.</p>`,
+    `<p><strong>Tempo de execucao:</strong> ${escapeHtml(timing.message || "Tempo de execucao indisponivel para comparacao.")}</p>`,
   ].join("");
   solverComparison.innerHTML = [
     `<p>${escapeHtml(result.message)}</p>`,

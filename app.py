@@ -531,6 +531,47 @@ def compare_solver_result(main_result: dict[str, Any], solver_result: dict[str, 
     }
 
 
+def compare_solver_timing(main_result: dict[str, Any], solver_result: dict[str, Any]) -> dict[str, Any]:
+    main_seconds = main_result.get("processing", {}).get("durationSeconds")
+    solver_seconds = solver_result.get("processing", {}).get("durationSeconds")
+    if main_seconds is None or solver_seconds is None:
+        return {
+            "available": False,
+            "mainSeconds": main_seconds,
+            "solverSeconds": solver_seconds,
+            "message": "Tempo de execucao indisponivel para comparacao.",
+        }
+
+    difference = float(main_seconds) - float(solver_seconds)
+    percent = (abs(difference) / float(main_seconds) * 100) if float(main_seconds) > 0 else None
+    if abs(difference) <= 1e-9:
+        message = "Os dois caminhos tiveram praticamente o mesmo tempo de execucao."
+        faster = "equal"
+    elif difference > 0:
+        message = (
+            f"O solver separado foi {difference:.3f} segundos mais rapido "
+            f"({percent:.1f}% de reducao no tempo)."
+        )
+        faster = "standaloneSolver"
+    else:
+        message = (
+            f"O projeto principal foi {abs(difference):.3f} segundos mais rapido "
+            f"({percent:.1f}% de reducao no tempo)."
+        )
+        faster = "main"
+
+    return {
+        "available": True,
+        "mainSeconds": main_seconds,
+        "solverSeconds": solver_seconds,
+        "differenceSeconds": difference,
+        "absoluteDifferenceSeconds": abs(difference),
+        "improvementPercent": percent,
+        "faster": faster,
+        "message": message,
+    }
+
+
 def build_solver_comparison(payload: dict[str, Any]) -> dict[str, Any]:
     main_result = compute_query(payload)
 
@@ -546,6 +587,7 @@ def build_solver_comparison(payload: dict[str, Any]) -> dict[str, Any]:
         "main": main_result,
         "standaloneSolver": solver_result,
         "comparison": compare_solver_result(main_result, solver_result),
+        "timing": compare_solver_timing(main_result, solver_result),
         "message": "Os mesmos dados da consulta foram resolvidos pelo solver separado scripts/solve_query.py e comparados com o projeto.",
     }
 
@@ -792,6 +834,7 @@ def write_solver_comparison_report(result: dict[str, Any]) -> None:
         if comparison["allMatch"]
         else "Foram encontradas diferencas entre o projeto e o solver separado."
     )
+    timing = result.get("timing", {})
     story = [
         Paragraph("Relatorio Comparativo: Projeto x Solver Separado", title),
         Spacer(1, 0.2 * cm),
@@ -818,6 +861,15 @@ def write_solver_comparison_report(result: dict[str, Any]) -> None:
         Spacer(1, 0.18 * cm),
         Paragraph("Conclusao da comparacao", styles["Heading2"]),
         Paragraph(status, body),
+        Paragraph("Tempo de execucao", styles["Heading2"]),
+        Paragraph(
+            (
+                f"Projeto principal: {format_report_metric(timing.get('mainSeconds'))} segundos.<br/>"
+                f"Solver separado: {format_report_metric(timing.get('solverSeconds'))} segundos.<br/>"
+                f"{timing.get('message', 'Tempo de execucao indisponivel para comparacao.')}"
+            ),
+            body,
+        ),
         Paragraph(
             "Essa comparacao evidencia que a interface nao apenas exibe resultados: ela esta alinhada "
             "ao solver independente usado para reproduzir a formulacao matematica da consulta.",
@@ -874,6 +926,7 @@ def solver_comparison_report():
             "main": result["main"],
             "standaloneSolver": result["standaloneSolver"],
             "comparison": result["comparison"],
+            "timing": result["timing"],
         }
     )
 
