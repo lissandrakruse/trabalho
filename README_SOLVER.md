@@ -96,6 +96,91 @@ razao, o projeto usa Charnes-Cooper para transformar a consulta em dois
 problemas lineares: um de minimo e outro de maximo. O resultado e um intervalo
 de valores possiveis para `P(A | B)`.
 
+## Alinhamento com os comentarios da turma
+
+O resumo passado no quadro pode ser lido como uma lista de requisitos tecnicos.
+No projeto, eles ficam organizados assim:
+
+1. Extrair conhecimento probabilistico da base
+
+O sistema transforma a base em eventos categoricos e extrai:
+
+- probabilidades marginais de cada valor de cada variavel, como `P(N=alto)`;
+- probabilidades conjuntas por pares de valores, como `P(N=alto, ph=acido)`;
+- evidencia especifica da consulta, como `P(A)`, `P(B)` e `P(A e B)`;
+- regras de associacao liberadas pela extracao, com suporte, confianca e lift;
+- metricas de classificacao quando existe um atributo-alvo de classe.
+
+2. Representar probabilidades como intervalos
+
+Cada probabilidade pontual observada e arredondada e convertida em uma faixa:
+
+```text
+valor_observado = 0.97666
+0.976 <= P(evento) <= 0.978
+```
+
+No codigo atual a largura padrao e `0.001` em torno do valor arredondado para
+tres casas. A ideia e evitar que pequenos erros de ponto flutuante tornem o
+programa linear artificialmente inviavel.
+
+3. Escrever conhecimento como restricoes lineares
+
+Uma probabilidade marginal ou conjunta vira:
+
+```text
+L <= soma(x_w onde evento ocorre) <= U
+```
+
+Uma regra de associacao liberada `R -> S`, quando usada pela confianca, vira:
+
+```text
+L <= P(R e S) / P(R) <= U
+P(R e S) - U.P(R) <= 0
+-P(R e S) + L.P(R) <= 0
+```
+
+4. Permitir pergunta condicional do usuario
+
+O usuario escolhe um evento alvo `A` e um conjunto de afirmacoes `B`. O sistema
+responde:
+
+```text
+P(A | B) = P(A e B) / P(B)
+```
+
+Se o usuario repetir o proprio alvo dentro das afirmacoes, o sistema remove essa
+repeticao de `B`, porque `P(A | A,B)` seria uma tautologia e nao uma pergunta
+informativa.
+
+5. Transformar a pergunta em objetivo do PL
+
+Como `P(A | B)` e uma fracao, ela e reescrita por Charnes-Cooper. Depois da
+transformacao, o solver resolve dois objetivos lineares:
+
+```text
+min P(A | B)
+max P(A | B)
+```
+
+O resultado final e um intervalo inferior/superior para a consulta.
+
+6. Resolver e comparar solvers
+
+O projeto executa o SciPy HiGHS no backend principal e, na comparacao, executa
+tambem `highs-ds` e `highs-ipm` pelo script separado. A tela compara valores,
+tempo de processamento, quantidade de variaveis e quantidade de restricoes.
+
+Gurobi, lp_solve e cuPDLP-C ficam documentados como alternativas para benchmark
+futuro.
+
+7. Pontos relacionados, mas opcionais nesta versao
+
+Laplace smoothing, verossimilhanca e tecnicas como annihilation/reinforcement
+foram registrados como extensoes possiveis. Eles nao sao necessarios para a
+versao atual, porque o foco entregue e: evidencia empirica, intervalos,
+restricoes lineares, pergunta condicional e comparacao de solvers.
+
 ## Topicos usados para construir o codigo
 
 O codigo foi organizado a partir de uma cadeia de raciocinio probabilistico:
@@ -422,4 +507,10 @@ reescrita em uma forma linear antes da chamada ao solver.
 - Nilsson, N. J. Probabilistic Logic. Artificial Intelligence, 1986.
 - Charnes, A.; Cooper, W. W. Programming with linear fractional functionals. Naval Research Logistics Quarterly, 1962.
 - Tessem, B. Interval probability propagation. International Journal of Approximate Reasoning, 1992.
+- Hooker, J. N. Mathematical programming models for reasoning under uncertainty. Operations Research Proceedings, 1992.
+- Hooker, J. N. Mathematical Programming Methods for Reasoning under Uncertainty, 1995.
+- SciPy documentation: `scipy.optimize.linprog`.
+- Gurobi documentation and introductory material on linear programming.
+- lp_solve project documentation.
+- cuPDLP-C: implementation for solving linear programming problems with first-order methods on GPU.
 - Artigos e materiais disponibilizados pelo professor no Classroom.
