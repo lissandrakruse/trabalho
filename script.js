@@ -272,6 +272,14 @@ async function runQuery() {
   runQueryButton.disabled = true;
   runQueryButton.textContent = "Resolvendo...";
   downloadReportLink.classList.add("is-hidden");
+  supportValue.textContent = "-";
+  confidenceValue.textContent = "-";
+  liftValue.textContent = "-";
+  countValue.textContent = "-";
+  probabilityText.innerHTML = "<div>Calculando consulta...</div>";
+  classificationMetrics.innerHTML = "";
+  linearProgram.textContent = "";
+  mathModel.innerHTML = "";
   const payload = buildPayload();
 
   try {
@@ -283,9 +291,11 @@ async function runQuery() {
     const result = await response.json();
     if (!response.ok || !result.ok) throw new Error(result.error || "Erro na consulta.");
 
-    supportValue.textContent = fmt(result.support);
-    confidenceValue.textContent = fmt(result.confidence);
-    liftValue.textContent = fmt(result.lift);
+    const queriedRule = result.queriedAssociationRule || null;
+    const releasedRule = result.releasedAssociationRule || null;
+    supportValue.textContent = releasedRule ? fmt(releasedRule.support) : "-";
+    confidenceValue.textContent = releasedRule ? fmt(releasedRule.confidence) : "-";
+    liftValue.textContent = releasedRule ? fmt(releasedRule.lift) : "-";
     countValue.textContent = `${result.countBoth}/${result.countBase}`;
 
     let linearInterval = `<div><strong>Intervalo linear:</strong> solver indisponível.</div>`;
@@ -295,7 +305,27 @@ async function runQuery() {
       linearInterval = `<div><strong>Intervalo linear:</strong> não calculado porque P(B)=0; nenhuma linha do dataset satisfaz todas as afirmações.</div>`;
     }
 
-    const ruleLabel = result.support > 0 && result.confidence > 0 ? "Regra candidata" : "Consulta sem regra aprendida";
+    const isZeroResult = Number(result.countBase) > 0 && Number(result.countBoth) === 0;
+    const zeroResultNotice = isZeroResult
+      ? `<div><strong>Contagem empirica:</strong> existem ${result.countBase} registros que satisfazem B, mas nenhum deles tambem satisfaz A.</div>`
+      : "";
+    const releasedRuleNotice = releasedRule
+      ? `<div><strong>Regra liberada encontrada:</strong> os cards usam suporte, confianca e lift fornecidos pela ferramenta de extracao de regras.</div>`
+      : `<div><strong>Sem regra liberada:</strong> a ferramenta de extracao avaliou esta consulta, mas nao liberou a regra. Por isso suporte, confianca e lift ficam sem valor nos cards.</div>`;
+    const ruleMetricContent = releasedRule
+      ? [
+          `<div><strong>Suporte:</strong> ${fmt(releasedRule.support)} fornecido pela regra liberada.</div>`,
+          `<div><strong>Confianca/Precisao:</strong> ${fmt(releasedRule.confidence)} fornecida pela regra liberada.</div>`,
+          `<div><strong>Lift:</strong> ${fmt(releasedRule.lift)} fornecido pela regra liberada.</div>`,
+        ].join("")
+      : `<div><strong>Suporte, confianca e lift nos cards:</strong> - (nenhuma regra liberada para esta consulta).</div>`;
+    const queriedRuleContent = queriedRule
+      ? `<div><strong>Regra consultada na extracao:</strong> suporte=${fmt(queriedRule.support)}, confianca=${fmt(queriedRule.confidence)}, lift=${fmt(queriedRule.lift)}; status=${escapeHtml(queriedRule.reason || "-")}.</div>`
+      : "";
+    const conclusionContent = releasedRule
+      ? result.conclusion
+      : `Para ${eventLabel(result.conditions)} -> ${eventLabel([result.target])}, a ferramenta de extracao nao liberou a regra. A interface mostra o retorno da extracao em texto e mantem suporte, confianca e lift dos cards sem valor.`;
+    const ruleLabel = releasedRule ? "Regra liberada" : "Consulta sem regra liberada";
     const learnedRuleCount = result.learnedAssociationRules?.length || 0;
     const topLearnedRule = result.learnedAssociationRules?.[0];
     const learnedRulePreview = topLearnedRule
@@ -323,15 +353,16 @@ async function runQuery() {
         ].join("")
       : learnedRulePreview;
     probabilityText.innerHTML = [
-      `<div><strong>Metricas da consulta:</strong> suporte, confianca e lift dos cards medem a regra perguntada pelo usuario; as regras aprendidas aparecem separadas na tabela abaixo.</div>`,
-      `<div><strong>${ruleLabel}:</strong> se ${eventLabel(result.conditions)}, então ${eventLabel([result.target])}.</div>`,
-      `<div><strong>Suporte:</strong> ${fmt(result.support)} representa P(A e B).</div>`,
-      `<div><strong>Confiança/Precisão:</strong> ${fmt(result.confidence)} representa P(A | B).</div>`,
-      `<div><strong>Lift:</strong> ${fmt(result.lift)} compara a regra com a probabilidade marginal de A.</div>`,
+      zeroResultNotice,
+      releasedRuleNotice,
+      `<div><strong>Metricas dos cards:</strong> suporte, confianca e lift aparecem somente quando a ferramenta de extracao libera a regra consultada; as demais regras liberadas aparecem separadas na tabela abaixo.</div>`,
+      `<div><strong>${ruleLabel}:</strong> se ${eventLabel(result.conditions)}, entao ${eventLabel([result.target])}.</div>`,
+      ruleMetricContent,
+      queriedRuleContent,
       `<div class="learned-rules-block"><strong>Regras aprendidas no PL:</strong> ${learnedRuleContent}</div>`,
       `<div><strong>Marginais:</strong> P(A)=${fmt(result.pA)} e P(B)=${fmt(result.pB)}.</div>`,
       linearInterval,
-      `<div><strong>Conclusão:</strong> ${result.conclusion}</div>`,
+      `<div><strong>Conclusao:</strong> ${conclusionContent}</div>`,
     ].join("");
     linearProgram.textContent = result.linearProgram;
     renderClassificationMetrics(result.classification);

@@ -310,6 +310,53 @@ def association_rule_status(
     }
 
 
+def extracted_rule_result(
+    rows: list[dict[str, str]],
+    antecedent: list[dict[str, str]],
+    consequent: list[dict[str, str]],
+) -> dict[str, Any]:
+    status = association_rule_status(rows, antecedent, consequent)
+    support = status["pBoth"]
+    confidence = status["confidence"]
+    lift = status["lift"]
+    released = (
+        support >= MIN_LEARNED_RULE_SUPPORT
+        and confidence is not None
+        and confidence >= MIN_LEARNED_RULE_CONFIDENCE
+        and lift is not None
+        and lift >= MIN_LEARNED_RULE_LIFT
+    )
+    if released:
+        release_reason = "liberada pela extracao de regras"
+    elif status["pAntecedent"] <= 0:
+        release_reason = "rejeitada: antecedente com probabilidade zero"
+    elif support < MIN_LEARNED_RULE_SUPPORT:
+        release_reason = f"rejeitada: suporte abaixo de {MIN_LEARNED_RULE_SUPPORT:.3f}"
+    elif confidence is None or confidence < MIN_LEARNED_RULE_CONFIDENCE:
+        release_reason = f"rejeitada: confianca abaixo de {MIN_LEARNED_RULE_CONFIDENCE:.3f}"
+    elif lift is None or lift < MIN_LEARNED_RULE_LIFT:
+        release_reason = f"rejeitada: lift abaixo de {MIN_LEARNED_RULE_LIFT:.3f}"
+    else:
+        release_reason = "rejeitada pelos limiares da extracao"
+
+    return {
+        "antecedent": antecedent,
+        "consequent": consequent,
+        "support": support,
+        "confidence": confidence,
+        "lift": lift,
+        "released": released,
+        "reason": release_reason,
+        "pAntecedent": status["pAntecedent"],
+        "pConsequent": status["pConsequent"],
+        "thresholds": {
+            "support": MIN_LEARNED_RULE_SUPPORT,
+            "confidence": MIN_LEARNED_RULE_CONFIDENCE,
+            "lift": MIN_LEARNED_RULE_LIFT,
+        },
+    }
+
+
 def condition_signature(conditions: list[dict[str, str]]) -> tuple[tuple[str, str], ...]:
     return tuple(sorted((item["attribute"], item["value"]) for item in conditions))
 
@@ -320,53 +367,87 @@ def mine_association_rules(
     max_rules: int = MAX_LEARNED_ASSOCIATION_RULES,
 ) -> list[dict[str, Any]]:
     attributes = list(domains.keys())
-    single_conditions = [
-        [{"attribute": attribute, "value": value}]
-        for attribute in attributes
-        for value in domains[attribute]
-    ]
-    antecedents = [*single_conditions]
+    total = len(rows)
+    single_counts: dict[tuple[str, str], int] = {}
+    pair_counts: dict[tuple[tuple[str, str], tuple[str, str]], int] = {}
+
+    for row in rows:
+        row_items = [(attribute, row[attribute]) for attribute in attributes]
+        for item in row_items:
+            single_counts[item] = single_counts.get(item, 0) + 1
+        for antecedent_item in row_items:
+            for consequent_item in row_items:
+                if consequent_item[0] == antecedent_item[0]:
+                    continue
+                key = (antecedent_item, consequent_item)
+                pair_counts[key] = pair_counts.get(key, 0) + 1
 
     rules: list[dict[str, Any]] = []
     seen: set[tuple[tuple[tuple[str, str], ...], tuple[tuple[str, str], ...]]] = set()
-    for antecedent in antecedents:
-        antecedent_attributes = {item["attribute"] for item in antecedent}
-        p_antecedent = probability(rows, antecedent)
-        if p_antecedent <= 0:
-            continue
-        for consequent_attribute in attributes:
-            if consequent_attribute in antecedent_attributes:
+    for antecedent_attribute in attributes:
+        for antecedent_value in domains[antecedent_attribute]:
+            antecedent_item = (antecedent_attribute, antecedent_value)
+            antecedent_count = single_counts.get(antecedent_item, 0)
+            if antecedent_count <= 0:
                 continue
-            for consequent_value in domains[consequent_attribute]:
-                consequent = [{"attribute": consequent_attribute, "value": consequent_value}]
-                signature = (condition_signature(antecedent), condition_signature(consequent))
-                if signature in seen:
+            antecedent = [{"attribute": antecedent_attribute, "value": antecedent_value}]
+            for consequent_attribute in attributes:
+                if consequent_attribute == antecedent_attribute:
                     continue
-                seen.add(signature)
-                p_consequent = probability(rows, consequent)
-                both = [*antecedent, *consequent]
-                support = probability(rows, both)
-                confidence = support / p_antecedent if p_antecedent > 0 else None
-                lift = confidence / p_consequent if confidence is not None and p_consequent > 0 else None
-                if (
-                    support >= MIN_LEARNED_RULE_SUPPORT
-                    and confidence is not None
-                    and confidence >= MIN_LEARNED_RULE_CONFIDENCE
-                    and lift is not None
-                    and lift >= MIN_LEARNED_RULE_LIFT
-                ):
-                    rules.append(
-                        {
-                            "antecedent": antecedent,
-                            "consequent": consequent,
-                            "support": support,
-                            "confidence": confidence,
-                            "lift": lift,
-                        }
-                    )
+                for consequent_value in domains[consequent_attribute]:
+                    consequent_item = (consequent_attribute, consequent_value)
+                    consequent = [{"attribute": consequent_attribute, "value": consequent_value}]
+                    signature = (condition_signature(antecedent), condition_signature(consequent))
+                    if signature in seen:
+                        continue
+                    seen.add(signature)
+                    consequent_count = single_counts.get(consequent_item, 0)
+                    if consequent_count <= 0:
+                        continue
+                    both_count = pair_counts.get((antecedent_item, consequent_item), 0)
+                    support = both_count / total
+                    confidence = both_count / antecedent_count
+                    p_consequent = consequent_count / total
+                    lift = confidence / p_consequent if p_consequent > 0 else None
+                    if (
+                        support >= MIN_LEARNED_RULE_SUPPORT
+                        and confidence >= MIN_LEARNED_RULE_CONFIDENCE
+                        and lift is not None
+                        and lift >= MIN_LEARNED_RULE_LIFT
+                    ):
+                        rules.append(
+                            {
+                                "antecedent": antecedent,
+                                "consequent": consequent,
+                                "support": support,
+                                "confidence": confidence,
+                                "lift": lift,
+                            }
+                        )
 
     rules.sort(key=lambda item: (item["lift"], item["confidence"], item["support"]), reverse=True)
     return rules[:max_rules]
+
+@lru_cache(maxsize=1)
+def learned_association_rules() -> tuple[dict[str, Any], ...]:
+    data = load_dataset()
+    return tuple(mine_association_rules(data["rows"], data["domains"]))
+
+
+def find_released_association_rule(
+    rules: list[dict[str, Any]],
+    antecedent: list[dict[str, str]],
+    consequent: list[dict[str, str]],
+) -> dict[str, Any] | None:
+    antecedent_signature = condition_signature(antecedent)
+    consequent_signature = condition_signature(consequent)
+    for rule in rules:
+        if (
+            condition_signature(rule["antecedent"]) == antecedent_signature
+            and condition_signature(rule["consequent"]) == consequent_signature
+        ):
+            return rule
+    return None
 
 
 def add_vectors(left: list[float], right: list[float], right_scale: float = 1.0) -> list[float]:
@@ -489,7 +570,7 @@ def build_linear_constraints(
                     ]
                     add_interval("pairwise_joint", conditions, probability(rows, conditions))
 
-    learned_rules = mine_association_rules(rows, domains)
+    learned_rules = list(learned_association_rules())
     for rule in learned_rules:
         add_learned_confidence_rule(rule)
 
@@ -524,6 +605,28 @@ def solve_linear_interval(
             "baseCount": denominator_count,
         }
 
+    both = [*base, target]
+    if not any(matches(world["values"], both) for world in worlds):
+        return {
+            "ok": True,
+            "lower": 0.0,
+            "upper": 0.0,
+            "variables": len(worlds),
+            "constraints": 0,
+            "baseConstraints": 0,
+            "constraintSummary": {
+                "marginal": 0,
+                "pairwiseJoint": 0,
+                "learnedAssociationRule": 0,
+                "selectedAssociationRule": 0,
+                "associationRule": 0,
+                "selected": 0,
+            },
+            "solver": "atalho empirico: nenhum mundo observado satisfaz A e B",
+            "solverMethod": "empirical-zero",
+            "solverName": "Atalho empirico",
+        }
+
     try:
         from scipy.optimize import linprog
     except Exception as error:
@@ -532,7 +635,6 @@ def solve_linear_interval(
     n = len(worlds)
     a_ub, b_ub, records = build_linear_constraints(worlds, rows, target, base)
 
-    both = [*base, target]
     denominator_mask = world_mask(worlds, base)
     numerator_mask = world_mask(worlds, both)
 
@@ -980,8 +1082,10 @@ def compute_query(
     count_a = probability_count(rows, [target])
     count_both = probability_count(rows, both)
     count_base = probability_count(rows, base)
+    learned_rules = list(learned_association_rules())
+    queried_rule = extracted_rule_result(rows, base, [target])
+    released_rule = queried_rule if queried_rule["released"] else find_released_association_rule(learned_rules, base, [target])
     lp = solve_linear_interval(data["worlds"], rows, target, base, solver_method, solver_name)
-    learned_rules = mine_association_rules(rows, data["domains"])
     classification = classification_metrics(count_a, count_base, count_both, data["total"])
     finished_at = datetime.now(timezone.utc)
     duration_seconds = time.perf_counter() - started_perf
@@ -1017,9 +1121,24 @@ def compute_query(
             }
             for rule in learned_rules
         ],
+        "queriedAssociationRule": queried_rule,
+        "releasedAssociationRule": (
+            {
+                "antecedent": released_rule["antecedent"],
+                "consequent": released_rule["consequent"],
+                "support": released_rule["support"],
+                "confidence": released_rule["confidence"],
+                "lift": released_rule["lift"],
+                "released": released_rule.get("released", True),
+                "reason": released_rule.get("reason", "liberada pela extracao de regras"),
+            }
+            if released_rule
+            else None
+        ),
         "classification": classification,
         "linearProgramSummary": linear_program_text(target, base, p_a, p_b, p_ab, lp),
-        "linearProgram": full_linear_program_text(data["worlds"], rows, target, base, lp),
+        "linearProgram": linear_program_text(target, base, p_a, p_b, p_ab, lp),
+        "linearProgramFullAvailable": True,
         "conclusion": conclusion,
     }
 
