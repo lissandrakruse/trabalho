@@ -90,6 +90,41 @@ h2 {
   font-weight: 700;
 }
 
+.tab-list {
+  display: inline-grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid #cfd9df;
+  border-radius: 8px;
+  background: #eef4f5;
+}
+
+.tab-button {
+  min-height: 34px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #52636e;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.tab-button.is-active {
+  background: #ffffff;
+  color: #16342f;
+  box-shadow: 0 4px 12px rgba(25, 42, 52, 0.08);
+}
+
+.tab-panel {
+  display: none;
+}
+
+.tab-panel.is-active {
+  display: block;
+}
+
 .icon-button {
   width: 36px;
   height: 36px;
@@ -245,6 +280,52 @@ select {
   white-space: pre-wrap;
 }
 
+.math-model {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.math-block {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid #dbe5e9;
+  border-radius: 8px;
+  background: #fbfcfd;
+}
+
+.math-block h3 {
+  margin: 0 0 8px;
+  color: #17352f;
+  font-size: 15px;
+}
+
+.math-block p {
+  color: #43535d;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.math-block code {
+  display: block;
+  width: 100%;
+  margin-top: 10px;
+  padding: 10px;
+  overflow-x: auto;
+  border-radius: 6px;
+  background: #101820;
+  color: #e8f3f1;
+  font-family: "Courier New", monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: nowrap;
+}
+
+.constraint-list {
+  display: grid;
+  gap: 8px;
+}
+
 .panel:nth-of-type(4),
 .panel:nth-of-type(5) {
   grid-column: 1 / -1;
@@ -269,5 +350,15 @@ select {
 
   .dataset-status {
     text-align: left;
+  }
+
+  .panel-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .tab-list,
+  .math-model {
+    grid-template-columns: 1fr;
   }
 }

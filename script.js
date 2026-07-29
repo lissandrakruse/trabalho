@@ -12,6 +12,9 @@ const liftValue = document.querySelector("#liftValue");
 const countValue = document.querySelector("#countValue");
 const probabilityText = document.querySelector("#probabilityText");
 const linearProgram = document.querySelector("#linearProgram");
+const mathModel = document.querySelector("#mathModel");
+const tabButtons = document.querySelectorAll(".tab-button");
+const tabPanels = document.querySelectorAll(".tab-panel");
 
 let domains = {};
 let labels = {};
@@ -83,6 +86,56 @@ function eventLabel(conditions) {
   return conditions.map((condition) => `${condition.attribute}=${condition.value}`).join(", ");
 }
 
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, (character) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#039;",
+  })[character]);
+}
+
+function intervalText(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return "-";
+  const rounded = Number(value).toFixed(3);
+  const lower = Math.max(0, Number(rounded) - 0.001).toFixed(3);
+  const upper = Math.min(1, Number(rounded) + 0.001).toFixed(3);
+  return `${lower} <= ${rounded} <= ${upper}`;
+}
+
+function setActiveTab(activeButton) {
+  tabButtons.forEach((button) => {
+    const isActive = button === activeButton;
+    button.classList.toggle("is-active", isActive);
+    button.setAttribute("aria-selected", String(isActive));
+  });
+
+  tabPanels.forEach((panel) => {
+    panel.classList.toggle("is-active", panel.id === activeButton.getAttribute("aria-controls"));
+  });
+}
+
+function renderMathModel(result) {
+  const aLabel = escapeHtml(eventLabel([result.target]));
+  const bLabel = escapeHtml(eventLabel(result.conditions));
+  const abLabel = escapeHtml(eventLabel([...result.conditions, result.target]));
+  const variableCount = result.linear?.variables || "n";
+  const constraintCount = result.linear?.constraints || "-";
+  const interval = result.linear?.ok
+    ? `${fmt(result.linear.lower)} <= P(A | B) <= ${fmt(result.linear.upper)}`
+    : "Nao calculado para esta consulta.";
+
+  mathModel.innerHTML = [
+    `<section class="math-block"><h3>1. Mundos e variáveis</h3><p>Cada mundo possível <strong>w</strong> representa uma combinação categorizada dos atributos do dataset. O modelo usa <strong>x<sub>w</sub></strong> como a probabilidade atribuída a esse mundo.</p><code>x<sub>w</sub> >= 0, para todo w em W &nbsp; (|W| = ${variableCount})</code></section>`,
+    `<section class="math-block"><h3>2. Normalização</h3><p>A distribuição reconstruída precisa somar 1.</p><code>sum<sub>w em W</sub> x<sub>w</sub> = 1</code></section>`,
+    `<section class="math-block"><h3>3. Evidências da base</h3><p>As frequências observadas viram restrições intervalares. A consulta atual define A = <strong>${aLabel}</strong> e B = <strong>${bLabel}</strong>.</p><div class="constraint-list"><code>P(A): ${intervalText(result.pA)}</code><code>P(B): ${intervalText(result.pB)}</code><code>P(A e B): ${intervalText(result.support)}</code></div><p>O solver também incorpora as probabilidades marginais dos valores categorizados de cada atributo.</p></section>`,
+    `<section class="math-block"><h3>4. Consulta condicional</h3><p>A pergunta é uma razão entre a probabilidade conjunta e a probabilidade do evento condicionante.</p><code>P(A | B) = P(A e B) / P(B) = sum(x<sub>w</sub> onde ${abLabel}) / sum(x<sub>w</sub> onde ${bLabel})</code></section>`,
+    `<section class="math-block"><h3>5. Charnes-Cooper</h3><p>Para resolver a razão como programação linear, o modelo aplica a transformação de Charnes-Cooper.</p><div class="constraint-list"><code>y<sub>w</sub> = x<sub>w</sub> / P(B)</code><code>t = 1 / P(B)</code><code>sum(y<sub>w</sub> onde B) = 1</code><code>A y - b t <= 0</code><code>sum<sub>w em W</sub> y<sub>w</sub> - t = 0</code></div></section>`,
+    `<section class="math-block"><h3>6. Objetivo</h3><p>O limite inferior minimiza a massa dos mundos que satisfazem A e B; o superior maximiza a mesma expressão.</p><div class="constraint-list"><code>min sum(y<sub>w</sub> onde ${abLabel})</code><code>max sum(y<sub>w</sub> onde ${abLabel})</code></div><p><strong>Resultado:</strong> ${interval}. Restrições lineares no solver: ${constraintCount}.</p></section>`,
+  ].join("");
+}
+
 async function runQuery() {
   runQueryButton.disabled = true;
   runQueryButton.textContent = "Resolvendo...";
@@ -126,9 +179,11 @@ async function runQuery() {
       `<div><strong>Conclusão:</strong> ${result.conclusion}</div>`,
     ].join("");
     linearProgram.textContent = result.linearProgram;
+    renderMathModel(result);
   } catch (error) {
     probabilityText.innerHTML = `<div><strong>Erro:</strong> ${error.message}</div>`;
     linearProgram.textContent = "";
+    mathModel.innerHTML = "";
   } finally {
     runQueryButton.disabled = false;
     runQueryButton.textContent = "Consultar";
@@ -168,6 +223,7 @@ async function generateReport() {
 
 async function boot() {
   const response = await fetch("/api/metadata");
+  if (!response.ok) throw new Error("API Python indisponivel.");
   const metadata = await response.json();
   domains = metadata.domains;
   labels = metadata.labels;
@@ -181,6 +237,9 @@ async function boot() {
   addConditionButton.addEventListener("click", () => createConditionRow());
   runQueryButton.addEventListener("click", runQuery);
   generateReportButton.addEventListener("click", generateReport);
+  tabButtons.forEach((button) => {
+    button.addEventListener("click", () => setActiveTab(button));
+  });
 
   const firstCondition = firstAttributeExcept(targetAttribute.value);
   createConditionRow(firstCondition, domains[firstCondition]?.[0]);
@@ -191,6 +250,11 @@ async function boot() {
 }
 
 boot().catch((error) => {
-  datasetStatus.textContent = "Erro ao carregar dataset";
+  datasetStatus.textContent = "Python nao conectado";
+  probabilityText.innerHTML = [
+    "<div><strong>Erro:</strong> a interface carregou, mas nao conseguiu falar com o backend Python.</div>",
+    "<div>Inicie o servidor com <strong>python app.py</strong> e acesse <strong>http://localhost:1000</strong>.</div>",
+  ].join("");
   linearProgram.textContent = error.message;
+  if (mathModel) mathModel.innerHTML = "";
 });

@@ -403,6 +403,16 @@ def home():
     return send_from_directory(ROOT, "index.html")
 
 
+@app.get("/styles.css")
+def styles():
+    return send_from_directory(ROOT, "styles.css")
+
+
+@app.get("/script.js")
+def scripts():
+    return send_from_directory(ROOT, "script.js")
+
+
 @app.get("/healthz")
 def healthz():
     return jsonify({"ok": True})
@@ -410,6 +420,8 @@ def healthz():
 
 @app.get("/<path:path>")
 def static_files(path: str):
+    if not path.startswith("reports/"):
+        return jsonify({"ok": False, "error": "Arquivo nao encontrado."}), 404
     return send_from_directory(ROOT, path)
 
 

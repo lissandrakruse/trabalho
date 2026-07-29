@@ -75,9 +75,18 @@
 
         <section class="panel">
           <div class="panel-head">
-            <h2>Programa Linear</h2>
+            <h2>Formula&ccedil;&atilde;o</h2>
+            <div class="tab-list" role="tablist" aria-label="Formula&ccedil;&atilde;o da consulta">
+              <button class="tab-button is-active" id="linearTab" type="button" role="tab" aria-selected="true" aria-controls="linearPanel">Programa Linear</button>
+              <button class="tab-button" id="mathTab" type="button" role="tab" aria-selected="false" aria-controls="mathPanel">Modelo Matem&aacute;tico</button>
+            </div>
           </div>
-          <pre class="lp-box" id="linearProgram"></pre>
+          <div class="tab-panel is-active" id="linearPanel" role="tabpanel" aria-labelledby="linearTab">
+            <pre class="lp-box" id="linearProgram"></pre>
+          </div>
+          <div class="tab-panel" id="mathPanel" role="tabpanel" aria-labelledby="mathTab">
+            <div class="math-model" id="mathModel"></div>
+          </div>
         </section>
       </section>
     </main>
