@@ -86,6 +86,7 @@ function eventLabel(conditions) {
 async function runQuery() {
   runQueryButton.disabled = true;
   runQueryButton.textContent = "Resolvendo...";
+  downloadReportLink.classList.add("is-hidden");
   const payload = {
     conditions: readConditions(),
     target: {
@@ -155,6 +156,7 @@ async function generateReport() {
     if (!response.ok || !result.ok) throw new Error(result.error || "Erro ao gerar relatório.");
     const reportUrl = `${result.reportUrl}?t=${Date.now()}`;
     downloadReportLink.href = reportUrl;
+    downloadReportLink.classList.remove("is-hidden");
     window.open(reportUrl, "_blank", "noopener");
   } catch (error) {
     probabilityText.innerHTML += `<div><strong>Relatório:</strong> ${error.message}</div>`;

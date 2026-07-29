@@ -191,6 +191,10 @@ select {
   place-items: center;
 }
 
+.is-hidden {
+  display: none;
+}
+
 .secondary-action:disabled {
   cursor: wait;
   opacity: 0.68;
