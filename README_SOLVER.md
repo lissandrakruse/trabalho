@@ -150,6 +150,64 @@ Uma regra com suporte conjunto zero nao e considerada uma regra aprendida. Ela
 continua aparecendo como consulta do usuario, mas nao entra como restricao ativa
 de confianca no programa linear, porque nao ha evidencia empirica para sustenta-la.
 
+5.1. Como as regras sao aprendidas
+
+O projeto tambem aprende regras diretamente do dataset, antes de considerar a
+consulta escolhida pelo usuario. Essas regras nao precisam ter relacao com o
+evento A nem com as condicoes B da interface.
+
+O processo usado e:
+
+```text
+1. gerar candidatos do tipo atributo=valor -> outro_atributo=outro_valor
+2. calcular suporte = P(antecedente e consequente)
+3. calcular confianca = P(consequente | antecedente)
+4. calcular lift = confianca / P(consequente)
+5. manter apenas regras com suporte, confianca e lift acima dos limiares
+6. ordenar por lift, depois confianca, depois suporte
+7. incorporar as 3 melhores regras ao programa linear
+```
+
+Limiar atual:
+
+```text
+suporte >= 0.010
+confianca >= 0.200
+lift >= 1.050
+```
+
+Exemplo de regra aprendida:
+
+```text
+label=mothbeans -> ph=alcalino
+suporte=0.020
+confianca=0.450
+lift=5.351
+```
+
+Essa regra vira uma restricao de confianca no PL. Se a regra aprendida for
+R -> S, entao:
+
+```text
+confianca(R -> S) = P(R e S) / P(R)
+```
+
+Como o PL precisa de restricoes lineares, a confianca e escrita como:
+
+```text
+L <= P(R e S) / P(R) <= U
+```
+
+e depois convertida em:
+
+```text
+P(R e S) - U.P(R) <= 0
+-P(R e S) + L.P(R) <= 0
+```
+
+Assim, o modelo incorpora conhecimento aprendido por regras de associacao sem
+depender de uma regra de consulta que possa ter suporte zero.
+
 6. Restricoes lineares
 
 As probabilidades extraidas viram restricoes do tipo:
@@ -163,6 +221,7 @@ O modelo inclui:
 - restricoes marginais para valores dos atributos;
 - restricoes conjuntas por pares de valores;
 - restricoes especificas da consulta selecionada;
+- restricoes das 3 melhores regras de associacao aprendidas do dataset;
 - restricao da regra de associacao selecionada quando ela possui suporte e
   confianca positivos.
 

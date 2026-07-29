@@ -250,8 +250,15 @@ function renderMathModel(result) {
   const interval = result.linear?.ok
     ? `${fmt(result.linear.lower)} <= P(A | B) <= ${fmt(result.linear.upper)}`
     : "Nao calculado para esta consulta.";
+  const learnedRules = result.learnedAssociationRules || [];
+  const learnedRuleItems = learnedRules.length
+    ? learnedRules
+        .map((rule) => `<code>${eventLabel(rule.antecedent)} -> ${eventLabel(rule.consequent)}; sup=${fmt(rule.support)}, conf=${fmt(rule.confidence)}, lift=${fmt(rule.lift)}</code>`)
+        .join("")
+    : "<code>Nenhuma regra aprendida atingiu os limiares.</code>";
 
   mathModel.innerHTML = [
+    `<section class="math-block"><h3>Regras aprendidas no PL</h3><p>Antes de resolver a consulta, o sistema minera regras gerais do dataset. Elas nao dependem do A e B escolhidos pelo usuario; entram no programa linear como conhecimento aprendido da base.</p><div class="constraint-list"><code>forma: antecedente -> consequente</code><code>suporte >= 0.010</code><code>confianca >= 0.200</code><code>lift >= 1.050</code>${learnedRuleItems}</div></section>`,
     `<section class="math-block"><h3>1. Mundos e variáveis</h3><p>Cada mundo possível <strong>w</strong> representa uma combinação categorizada dos atributos do dataset. O modelo usa <strong>x<sub>w</sub></strong> como a probabilidade atribuída a esse mundo.</p><code>x<sub>w</sub> >= 0, para todo w em W &nbsp; (|W| = ${variableCount})</code></section>`,
     `<section class="math-block"><h3>2. Normalização</h3><p>A distribuição reconstruída precisa somar 1.</p><code>sum<sub>w em W</sub> x<sub>w</sub> = 1</code></section>`,
     `<section class="math-block"><h3>3. Evidências da base</h3><p>As frequências observadas viram restrições intervalares. A consulta atual define A = <strong>${aLabel}</strong> e B = <strong>${bLabel}</strong>.</p><div class="constraint-list"><code>P(A): ${intervalText(result.pA)}</code><code>P(B): ${intervalText(result.pB)}</code><code>P(A e B): ${intervalText(result.support)}</code></div><p>O solver também incorpora as probabilidades marginais dos valores categorizados de cada atributo.</p></section>`,
