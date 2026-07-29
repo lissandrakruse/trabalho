@@ -257,8 +257,9 @@ async function runQuery() {
       linearInterval = `<div><strong>Intervalo linear:</strong> não calculado porque P(B)=0; nenhuma linha do dataset satisfaz todas as afirmações.</div>`;
     }
 
+    const ruleLabel = result.support > 0 && result.confidence > 0 ? "Regra candidata" : "Consulta sem regra aprendida";
     probabilityText.innerHTML = [
-      `<div><strong>Regra:</strong> se ${eventLabel(result.conditions)}, então ${eventLabel([result.target])}.</div>`,
+      `<div><strong>${ruleLabel}:</strong> se ${eventLabel(result.conditions)}, então ${eventLabel([result.target])}.</div>`,
       `<div><strong>Suporte:</strong> ${fmt(result.support)} representa P(A e B).</div>`,
       `<div><strong>Confiança/Precisão:</strong> ${fmt(result.confidence)} representa P(A | B).</div>`,
       `<div><strong>Lift:</strong> ${fmt(result.lift)} compara a regra com a probabilidade marginal de A.</div>`,

@@ -18,6 +18,8 @@ GENERATED_REPORT_DIR = ROOT / "reports" / "generated"
 QUERY_REPORT_PATH = GENERATED_REPORT_DIR / "relatorio_consulta_atual.pdf"
 SOLVER_COMPARISON_REPORT_PATH = GENERATED_REPORT_DIR / "relatorio_comparacao_solver.pdf"
 FULL_LINEAR_PROGRAM_PATH = GENERATED_REPORT_DIR / "programa_linear_completo.txt"
+MIN_ASSOCIATION_SUPPORT = 1e-12
+MIN_ASSOCIATION_CONFIDENCE = 1e-12
 KNOWN_LABELS = {
     "N": "Nitrogenio",
     "P": "Fosforo",
@@ -215,6 +217,40 @@ def association_rule_description(
     )
 
 
+def association_rule_status(
+    rows: list[dict[str, str]],
+    antecedent: list[dict[str, str]],
+    consequent: list[dict[str, str]],
+) -> dict[str, Any]:
+    p_antecedent = probability(rows, antecedent)
+    p_consequent = probability(rows, consequent)
+    p_both = probability(rows, [*antecedent, *consequent])
+    confidence = p_both / p_antecedent if p_antecedent > 0 else None
+    lift = confidence / p_consequent if confidence is not None and p_consequent > 0 else None
+    accepted = (
+        p_both > MIN_ASSOCIATION_SUPPORT
+        and confidence is not None
+        and confidence > MIN_ASSOCIATION_CONFIDENCE
+    )
+    if accepted:
+        reason = "inserida como restricao linear de confianca"
+    elif p_antecedent <= 0:
+        reason = "rejeitada: antecedente com probabilidade zero"
+    elif p_both <= MIN_ASSOCIATION_SUPPORT:
+        reason = "rejeitada: suporte conjunto zero"
+    else:
+        reason = "rejeitada: confianca zero"
+    return {
+        "accepted": accepted,
+        "reason": reason,
+        "pAntecedent": p_antecedent,
+        "pConsequent": p_consequent,
+        "pBoth": p_both,
+        "confidence": confidence,
+        "lift": lift,
+    }
+
+
 def add_vectors(left: list[float], right: list[float], right_scale: float = 1.0) -> list[float]:
     return [left_item + right_scale * right_item for left_item, right_item in zip(left, right)]
 
@@ -257,11 +293,12 @@ def build_linear_constraints(
         antecedent: list[dict[str, str]],
         consequent: list[dict[str, str]],
     ) -> None:
-        antecedent_probability = probability(rows, antecedent)
-        if antecedent_probability <= 0:
+        status = association_rule_status(rows, antecedent, consequent)
+        if not status["accepted"]:
             return
+        antecedent_probability = status["pAntecedent"]
         both = [*antecedent, *consequent]
-        confidence = probability(rows, both) / antecedent_probability
+        confidence = status["confidence"]
         lower, upper = rounded_interval(confidence)
         antecedent_mask = world_mask(worlds, antecedent)
         both_mask = world_mask(worlds, both)
@@ -534,15 +571,22 @@ def full_linear_program_text(
             "",
             "REGRAS DE ASSOCIACAO LIGADAS A CONSULTA",
             "",
-            "Regra selecionada completa B -> A:",
+            "Regra candidata selecionada B -> A:",
             f"  {association_rule_description(rows, base, [target])}",
+        ]
+    )
+    selected_rule_status = association_rule_status(rows, base, [target])
+    lines.append(f"  Status no programa linear: {selected_rule_status['reason']}.")
+    lines.extend(
+        [
             "",
             "Regras B -> A para todos os valores possiveis do atributo alvo:",
         ]
     )
     for value in target_values:
         candidate = [{"attribute": target_attribute, "value": value}]
-        lines.append(f"  {association_rule_description(rows, base, candidate)}")
+        status = association_rule_status(rows, base, candidate)
+        lines.append(f"  {association_rule_description(rows, base, candidate)} | status={status['reason']}")
 
     if len(base) > 1:
         lines.extend(
@@ -552,7 +596,8 @@ def full_linear_program_text(
             ]
         )
         for condition in base:
-            lines.append(f"  {association_rule_description(rows, [condition], [target])}")
+            status = association_rule_status(rows, [condition], [target])
+            lines.append(f"  {association_rule_description(rows, [condition], [target])} | status={status['reason']}")
 
     lines.extend(
         [
@@ -565,11 +610,11 @@ def full_linear_program_text(
     grouped_titles = {
         "marginal": "1. Probabilidades marginais",
         "pairwise_joint": "2. Probabilidades conjuntas por pares de valores",
-        "association_rule": "3. Regras de associacao gerais usadas como restricao ativa",
+        "association_rule": "3. Regras de associacao aceitas como restricao ativa",
         "selected_target": "4. Evento alvo A da consulta",
         "selected_base": "5. Evento condicionante B da consulta",
         "selected_joint": "6. Evento conjunto A e B da consulta",
-        "selected_association_rule": "7. Regra de associacao selecionada B -> A",
+        "selected_association_rule": "7. Regra de associacao selecionada B -> A aceita como restricao ativa",
     }
     for kind, title in grouped_titles.items():
         selected_records = [item for item in records if item["kind"] == kind]

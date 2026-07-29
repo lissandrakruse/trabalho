@@ -12,6 +12,8 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DATASET = ROOT / "data" / "Crop_recommendation.csv"
+MIN_ASSOCIATION_SUPPORT = 1e-12
+MIN_ASSOCIATION_CONFIDENCE = 1e-12
 
 
 def parse_condition(text: str) -> dict[str, str]:
@@ -179,6 +181,19 @@ def event_key(conditions: list[dict[str, str]]) -> str:
     return ", ".join(f"{item['attribute']}={item['value']}" for item in conditions)
 
 
+def association_rule_is_valid(
+    rows: list[dict[str, str]],
+    antecedent: list[dict[str, str]],
+    consequent: list[dict[str, str]],
+) -> bool:
+    p_antecedent = probability(rows, antecedent)
+    if p_antecedent <= 0:
+        return False
+    p_both = probability(rows, [*antecedent, *consequent])
+    confidence = p_both / p_antecedent
+    return p_both > MIN_ASSOCIATION_SUPPORT and confidence > MIN_ASSOCIATION_CONFIDENCE
+
+
 def build_linear_constraints(
     data: dict[str, Any],
     target: dict[str, str],
@@ -209,9 +224,9 @@ def build_linear_constraints(
         antecedent: list[dict[str, str]],
         consequent: list[dict[str, str]],
     ) -> None:
-        antecedent_probability = probability(rows, antecedent)
-        if antecedent_probability <= 0:
+        if not association_rule_is_valid(rows, antecedent, consequent):
             return
+        antecedent_probability = probability(rows, antecedent)
         both = [*antecedent, *consequent]
         confidence = probability(rows, both) / antecedent_probability
         lower, upper = rounded_interval(confidence)
