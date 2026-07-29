@@ -364,7 +364,8 @@ async function compareSolver() {
 async function generateFullLinearProgram() {
   generateFullLinearProgramButton.disabled = true;
   generateFullLinearProgramButton.textContent = "Gerando LP...";
-  downloadFullLinearProgramLink.classList.add("is-hidden");
+  downloadFullLinearProgramLink.classList.add("is-disabled");
+  downloadFullLinearProgramLink.setAttribute("aria-disabled", "true");
 
   try {
     const response = await fetch("/api/linear-program/full", {
@@ -375,7 +376,8 @@ async function generateFullLinearProgram() {
     const result = await response.json();
     if (!response.ok || !result.ok) throw new Error(result.error || "Erro ao gerar LP completo.");
     downloadFullLinearProgramLink.href = `${result.fileUrl}?t=${Date.now()}`;
-    downloadFullLinearProgramLink.classList.remove("is-hidden");
+    downloadFullLinearProgramLink.classList.remove("is-disabled");
+    downloadFullLinearProgramLink.setAttribute("aria-disabled", "false");
     linearProgram.textContent = `${linearProgram.textContent}\n\nArquivo completo gerado: ${result.fileUrl}`;
   } catch (error) {
     linearProgram.textContent = `${linearProgram.textContent}\n\nErro ao gerar LP completo: ${error.message}`;
@@ -404,6 +406,11 @@ async function boot() {
   compareSolverButton.addEventListener("click", compareSolver);
   generateSolverReportButton.addEventListener("click", generateSolverReport);
   generateFullLinearProgramButton.addEventListener("click", generateFullLinearProgram);
+  downloadFullLinearProgramLink.addEventListener("click", (event) => {
+    if (downloadFullLinearProgramLink.classList.contains("is-disabled")) {
+      event.preventDefault();
+    }
+  });
   tabButtons.forEach((button) => {
     button.addEventListener("click", () => setActiveTab(button));
   });

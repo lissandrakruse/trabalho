@@ -139,6 +139,27 @@ h2 {
   font-size: 13px;
 }
 
+.is-disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  pointer-events: auto;
+}
+
+.formulation-note {
+  margin-bottom: 12px;
+  padding: 12px;
+  border: 1px solid #dbe5e9;
+  border-radius: 8px;
+  background: #f7faf9;
+  color: #43535d;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.formulation-note strong {
+  color: #17352f;
+}
+
 .icon-button {
   width: 36px;
   height: 36px;

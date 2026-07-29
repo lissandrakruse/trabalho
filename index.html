@@ -109,10 +109,13 @@
                 <button class="tab-button" id="mathTab" type="button" role="tab" aria-selected="false" aria-controls="mathPanel">Modelo Matem&aacute;tico</button>
               </div>
               <button class="secondary-action compact-action" id="generateFullLinearProgram" type="button">Gerar LP Completo</button>
-              <a class="download-link compact-action is-hidden" id="downloadFullLinearProgram" href="/reports/generated/programa_linear_completo.txt" target="_blank" rel="noopener">Baixar LP Completo</a>
+              <a class="download-link compact-action is-disabled" id="downloadFullLinearProgram" href="/reports/generated/programa_linear_completo.txt" target="_blank" rel="noopener" aria-disabled="true">Baixar LP Completo</a>
             </div>
           </div>
           <div class="tab-panel is-active" id="linearPanel" role="tabpanel" aria-labelledby="linearTab">
+            <div class="formulation-note">
+              Este painel mostra um resumo leg&iacute;vel do programa linear da consulta. Clique em <strong>Gerar LP Completo</strong> para criar o arquivo com marginais, conjuntas por pares, regra de associa&ccedil;&atilde;o selecionada, transforma&ccedil;&atilde;o de Charnes-Cooper e objetivos do solver.
+            </div>
             <pre class="lp-box" id="linearProgram"></pre>
           </div>
           <div class="tab-panel" id="mathPanel" role="tabpanel" aria-labelledby="mathTab">
