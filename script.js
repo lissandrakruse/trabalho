@@ -303,12 +303,32 @@ async function runQuery() {
       : learnedRuleCount
       ? `Foram incorporadas ${learnedRuleCount} regras de associação aprendidas do dataset ao programa linear, independentemente da consulta atual.`
       : "Nenhuma regra de associação aprendida atingiu os limiares de suporte, confiança e lift para entrar no programa linear.";
+    const learnedRuleRows = (result.learnedAssociationRules || []).map((rule, index) => {
+      return [
+        `<tr>`,
+        `<td>${index + 1}</td>`,
+        `<td>${escapeHtml(eventLabel(rule.antecedent))} -> ${escapeHtml(eventLabel(rule.consequent))}</td>`,
+        `<td>${fmt(rule.support)}</td>`,
+        `<td>${fmt(rule.confidence)}</td>`,
+        `<td>${fmt(rule.lift)}</td>`,
+        `</tr>`,
+      ].join("");
+    });
+    const learnedRuleContent = learnedRuleCount
+      ? [
+          `<div>Foram incorporadas ${learnedRuleCount} regras de associacao aprendidas do dataset ao programa linear, independentemente da consulta atual.</div>`,
+          `<table class="learned-rules-table"><thead><tr><th>#</th><th>Regra aprendida</th><th>Suporte</th><th>Confianca</th><th>Lift</th></tr></thead><tbody>`,
+          learnedRuleRows.join(""),
+          `</tbody></table>`,
+        ].join("")
+      : learnedRulePreview;
     probabilityText.innerHTML = [
+      `<div><strong>Metricas da consulta:</strong> suporte, confianca e lift dos cards medem a regra perguntada pelo usuario; as regras aprendidas aparecem separadas na tabela abaixo.</div>`,
       `<div><strong>${ruleLabel}:</strong> se ${eventLabel(result.conditions)}, então ${eventLabel([result.target])}.</div>`,
       `<div><strong>Suporte:</strong> ${fmt(result.support)} representa P(A e B).</div>`,
       `<div><strong>Confiança/Precisão:</strong> ${fmt(result.confidence)} representa P(A | B).</div>`,
       `<div><strong>Lift:</strong> ${fmt(result.lift)} compara a regra com a probabilidade marginal de A.</div>`,
-      `<div><strong>Regras aprendidas no PL:</strong> ${learnedRulePreview}</div>`,
+      `<div class="learned-rules-block"><strong>Regras aprendidas no PL:</strong> ${learnedRuleContent}</div>`,
       `<div><strong>Marginais:</strong> P(A)=${fmt(result.pA)} e P(B)=${fmt(result.pB)}.</div>`,
       linearInterval,
       `<div><strong>Conclusão:</strong> ${result.conclusion}</div>`,

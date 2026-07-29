@@ -301,6 +301,31 @@ select {
   line-height: 1.5;
 }
 
+.learned-rules-block {
+  display: grid;
+  gap: 8px;
+}
+
+.learned-rules-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.learned-rules-table th,
+.learned-rules-table td {
+  padding: 8px;
+  border: 1px solid #dbe5e9;
+  text-align: left;
+  vertical-align: top;
+}
+
+.learned-rules-table th {
+  background: #eef4f5;
+  color: #17352f;
+  font-weight: 800;
+}
+
 .classification-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
