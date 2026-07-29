@@ -296,7 +296,93 @@ def build_report() -> None:
     )
     story.append(metadata_table)
 
-    add_heading(story, "3. Exemplo de pergunta do usuario", h2)
+    add_heading(story, "3. Algoritmos matematicos usados", h2)
+    story.append(
+        Paragraph(
+            "Abaixo estao os principais algoritmos matematicos implementados no "
+            "backend Python. Eles explicam como o dataset vira probabilidades, "
+            "restricoes e uma consulta resolvida por programacao linear.",
+            body,
+        )
+    )
+    algorithms_table = styled_table(
+        [
+            ["Etapa", "Formula/algoritmo", "Finalidade"],
+            [
+                "Discretizacao",
+                "atributo numerico <= Q1 -> baixo; <= Q2 -> medio; > Q2 -> alto",
+                "Transformar variaveis numericas em categorias para montar mundos possiveis.",
+            ],
+            [
+                "Probabilidade marginal",
+                "P(E) = contagem(E) / N",
+                "Medir a frequencia de um evento simples, como P(label=rice).",
+            ],
+            [
+                "Probabilidade conjunta",
+                "P(A e B) = contagem(A e B) / N",
+                "Medir a frequencia de eventos que acontecem ao mesmo tempo.",
+            ],
+            [
+                "Probabilidade condicional",
+                "P(A | B) = P(A e B) / P(B)",
+                "Responder a pergunta feita pelo usuario na interface.",
+            ],
+            [
+                "Suporte",
+                "suporte(B -> A) = P(A e B)",
+                "Indicar quanto a regra completa aparece na base.",
+            ],
+            [
+                "Confianca/precisao",
+                "confianca(B -> A) = P(A | B)",
+                "Indicar a chance de A acontecer quando B acontece.",
+            ],
+            [
+                "Lift",
+                "lift(B -> A) = P(A | B) / P(A)",
+                "Comparar a regra com a probabilidade marginal de A.",
+            ],
+            [
+                "Intervalo",
+                "round(p, 3) - 0,001 <= P(E) <= round(p, 3) + 0,001",
+                "Evitar rigidez numerica e representar probabilidade intervalar.",
+            ],
+            [
+                "Variavel linear",
+                "x_w >= 0 para cada mundo possivel w; soma(x_w) = 1",
+                "Representar uma distribuicao de probabilidade valida.",
+            ],
+            [
+                "Restricao linear",
+                "L <= soma(x_w onde E ocorre) <= U",
+                "Converter probabilidades extraidas da base em restricoes do LP.",
+            ],
+            [
+                "Charnes-Cooper",
+                "P(A e B)/P(B) -> x_w = y_w/t, com P(B) em y = 1",
+                "Transformar a consulta condicional fracionaria em problema linear.",
+            ],
+        ],
+        [3.6 * cm, 6.4 * cm, 5.6 * cm],
+        header_color=INK,
+    )
+    story.append(algorithms_table)
+    story.append(Spacer(1, 0.12 * cm))
+    story.append(
+        Paragraph(
+            "Pseudocodigo resumido:<br/>"
+            "1. Ler CSV e detectar colunas.<br/>"
+            "2. Converter atributos numericos para categorias.<br/>"
+            "3. Agrupar linhas em mundos possiveis w.<br/>"
+            "4. Calcular P(A), P(B), P(A e B), suporte, confianca e lift.<br/>"
+            "5. Criar restricoes intervalares para as probabilidades observadas.<br/>"
+            "6. Resolver minimo e maximo da consulta condicional com scipy.optimize.linprog.",
+            code,
+        )
+    )
+
+    add_heading(story, "4. Exemplo de pergunta do usuario", h2)
     story.append(
         Paragraph(
             "Na interface, o usuario pode escolher uma pergunta A e uma ou mais "
@@ -307,7 +393,7 @@ def build_report() -> None:
     story.append(Paragraph("A = label=rice<br/>B = ph=acido, rainfall=alto", code))
     story.append(Paragraph("Consulta: P(label=rice | ph=acido, rainfall=alto)", body))
 
-    add_heading(story, "4. Saida probabilistica", h2)
+    add_heading(story, "5. Saida probabilistica", h2)
     metrics_table = styled_table(
         [
             ["Metrica", "Valor", "Interpretacao"],
@@ -338,7 +424,7 @@ def build_report() -> None:
         )
     )
 
-    add_heading(story, "5. Grafico do intervalo linear", h2)
+    add_heading(story, "6. Grafico do intervalo linear", h2)
     story.append(
         Paragraph(
             "O grafico abaixo compara o valor empirico da confianca com o intervalo "
@@ -350,7 +436,7 @@ def build_report() -> None:
     )
     story.append(interval_chart(confidence, lp_lower, lp_upper))
 
-    add_heading(story, "6. Probabilidades lineares consideradas", h2)
+    add_heading(story, "7. Probabilidades lineares consideradas", h2)
     story.append(
         Paragraph(
             "No modelo atual entram automaticamente as probabilidades lineares mais "
@@ -377,7 +463,7 @@ def build_report() -> None:
     )
     story.append(linear_table)
 
-    add_heading(story, "7. Programacao linear", h2)
+    add_heading(story, "8. Programacao linear", h2)
     story.append(
         Paragraph(
             "Cada mundo possivel w recebe uma variavel x_w, que representa a "
@@ -390,7 +476,7 @@ def build_report() -> None:
     )
     story.append(Paragraph(lp_text.replace("\n", "<br/>"), code))
 
-    add_heading(story, "8. Saida final apresentada ao usuario", h2)
+    add_heading(story, "9. Saida final apresentada ao usuario", h2)
     if lp.get("ok"):
         interval_text = f"{fmt(lp['lower'])} <= P(A | B) <= {fmt(lp['upper'])}"
     else:
@@ -411,7 +497,7 @@ def build_report() -> None:
         )
     )
 
-    add_heading(story, "9. Arquivo de saida calculada", h2)
+    add_heading(story, "10. Arquivo de saida calculada", h2)
     story.append(
         Paragraph(
             "Alem do PDF, o gerador salva um JSON com a consulta, probabilidades, "
@@ -422,7 +508,7 @@ def build_report() -> None:
     )
     story.append(Paragraph("reports/saida_calculada_programacao_linear.json", code))
 
-    add_heading(story, "10. Relacao com o enunciado", h2)
+    add_heading(story, "11. Relacao com o enunciado", h2)
     story.append(
         Paragraph(
             "A saida comprova que o sistema extrai conhecimento probabilistico "
