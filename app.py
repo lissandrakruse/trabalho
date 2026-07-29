@@ -172,6 +172,20 @@ def solve_linear_interval(
     target: dict[str, str],
     base: list[dict[str, str]],
 ) -> dict[str, Any]:
+    denominator_probability = probability(rows, base)
+    denominator_count = probability_count(rows, base)
+    if denominator_count == 0 or denominator_probability <= 0:
+        return {
+            "ok": False,
+            "reason": "zero_denominator",
+            "error": (
+                "A consulta condicional nao pode ser resolvida porque P(B)=0 na base. "
+                "Nenhum registro satisfaz todas as afirmacoes escolhidas."
+            ),
+            "baseProbability": denominator_probability,
+            "baseCount": denominator_count,
+        }
+
     try:
         from scipy.optimize import linprog
     except Exception as error:
@@ -292,6 +306,15 @@ def linear_program_text(
                 f"Variaveis: {lp['variables']}",
                 f"Restricoes: {lp['constraints']}",
                 f"Intervalo retornado: {lp['lower']:.3f} <= P(A | B) <= {lp['upper']:.3f}",
+            ]
+        )
+    elif lp.get("reason") == "zero_denominator":
+        lines.extend(
+            [
+                "",
+                "Consulta nao resolvida pelo solver:",
+                "  P(B)=0 na base, entao P(A | B) = P(A e B) / P(B) teria denominador zero.",
+                "  Escolha menos afirmacoes ou uma combinacao B que exista no dataset.",
             ]
         )
     else:

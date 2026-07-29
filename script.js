@@ -106,9 +106,12 @@ async function runQuery() {
     liftValue.textContent = fmt(result.lift);
     countValue.textContent = `${result.countBoth}/${result.countBase}`;
 
-    const linearInterval = result.linear?.ok
-      ? `<div><strong>Intervalo linear:</strong> ${fmt(result.linear.lower)} <= P(A | B) <= ${fmt(result.linear.upper)}.</div>`
-      : `<div><strong>Intervalo linear:</strong> solver indisponível.</div>`;
+    let linearInterval = `<div><strong>Intervalo linear:</strong> solver indisponível.</div>`;
+    if (result.linear?.ok) {
+      linearInterval = `<div><strong>Intervalo linear:</strong> ${fmt(result.linear.lower)} <= P(A | B) <= ${fmt(result.linear.upper)}.</div>`;
+    } else if (result.linear?.reason === "zero_denominator") {
+      linearInterval = `<div><strong>Intervalo linear:</strong> não calculado porque P(B)=0; nenhuma linha do dataset satisfaz todas as afirmações.</div>`;
+    }
 
     probabilityText.innerHTML = [
       `<div><strong>Regra:</strong> se ${eventLabel(result.conditions)}, então ${eventLabel([result.target])}.</div>`,
