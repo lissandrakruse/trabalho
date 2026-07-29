@@ -12,9 +12,7 @@ from flask import Flask, jsonify, request, send_from_directory
 
 ROOT = Path(__file__).resolve().parent
 DATASET_PATH = ROOT / "data" / "Crop_recommendation.csv"
-NUMERIC_ATTRIBUTES = ["N", "P", "K", "temperature", "humidity", "ph", "rainfall"]
-ATTRIBUTES = [*NUMERIC_ATTRIBUTES, "label"]
-LABELS = {
+KNOWN_LABELS = {
     "N": "Nitrogenio",
     "P": "Fosforo",
     "K": "Potassio",
@@ -38,9 +36,21 @@ def quantile(values: list[float], q: float) -> float:
     return ordered[base] + rest * (ordered[base + 1] - ordered[base])
 
 
+def label_for(attribute: str) -> str:
+    return KNOWN_LABELS.get(attribute, attribute.replace("_", " ").title())
+
+
+def is_number(value: str) -> bool:
+    try:
+        float(value)
+        return True
+    except (TypeError, ValueError):
+        return False
+
+
 def category_for(attribute: str, value: str, thresholds: dict[str, dict[str, float]]) -> str:
     number = float(value)
-    if attribute == "ph":
+    if attribute.lower() == "ph":
         if number < 6:
             return "acido"
         if number <= 7.5:
@@ -59,12 +69,12 @@ def event_key(conditions: list[dict[str, str]]) -> str:
     return ", ".join(f"{item['attribute']}={item['value']}" for item in conditions)
 
 
-def valid_conditions(conditions: list[dict[str, Any]]) -> list[dict[str, str]]:
+def valid_conditions(conditions: list[dict[str, Any]], domains: dict[str, list[str]]) -> list[dict[str, str]]:
     cleaned = []
     for condition in conditions:
         attribute = str(condition.get("attribute", "")).strip()
         value = str(condition.get("value", "")).strip()
-        if attribute not in ATTRIBUTES or not value:
+        if attribute not in domains or value not in domains[attribute]:
             raise ValueError("Condicao invalida.")
         cleaned.append({"attribute": attribute, "value": value})
     return cleaned
@@ -74,9 +84,19 @@ def valid_conditions(conditions: list[dict[str, Any]]) -> list[dict[str, str]]:
 def load_dataset() -> dict[str, Any]:
     with DATASET_PATH.open("r", encoding="utf-8", newline="") as file:
         raw_rows = list(csv.DictReader(file))
+    if not raw_rows:
+        raise RuntimeError("Dataset vazio.")
+
+    attributes = list(raw_rows[0].keys())
+    numeric_attributes = [
+        attribute
+        for attribute in attributes
+        if all(is_number(row.get(attribute, "")) for row in raw_rows)
+    ]
+    categorical_attributes = [attribute for attribute in attributes if attribute not in numeric_attributes]
 
     thresholds = {}
-    for attribute in NUMERIC_ATTRIBUTES:
+    for attribute in numeric_attributes:
         values = [float(row[attribute]) for row in raw_rows]
         thresholds[attribute] = {
             "low": quantile(values, 1 / 3),
@@ -87,28 +107,33 @@ def load_dataset() -> dict[str, Any]:
     for row in raw_rows:
         categorized = {
             attribute: category_for(attribute, row[attribute], thresholds)
-            for attribute in NUMERIC_ATTRIBUTES
+            for attribute in numeric_attributes
         }
-        categorized["label"] = row["label"]
+        for attribute in categorical_attributes:
+            categorized[attribute] = row[attribute]
         categorical_rows.append(categorized)
 
     domains = {
         attribute: sorted({row[attribute] for row in categorical_rows})
-        for attribute in ATTRIBUTES
+        for attribute in attributes
     }
     world_counts: dict[tuple[str, ...], int] = {}
     for row in categorical_rows:
-        key = tuple(row[attribute] for attribute in ATTRIBUTES)
+        key = tuple(row[attribute] for attribute in attributes)
         world_counts[key] = world_counts.get(key, 0) + 1
     worlds = [
-        {"values": dict(zip(ATTRIBUTES, key)), "count": count}
+        {"values": dict(zip(attributes, key)), "count": count}
         for key, count in world_counts.items()
     ]
 
     return {
+        "attributes": attributes,
+        "numericAttributes": numeric_attributes,
+        "categoricalAttributes": categorical_attributes,
         "rows": categorical_rows,
         "worlds": worlds,
         "domains": domains,
+        "labels": {attribute: label_for(attribute) for attribute in attributes},
         "thresholds": thresholds,
         "total": len(categorical_rows),
     }
@@ -162,7 +187,8 @@ def solve_linear_interval(
         b_ub.append(-lower)
 
     # Marginais de todos os valores observados: conhecimento probabilistico da base.
-    for attribute in ATTRIBUTES:
+    attributes = list(rows[0].keys())
+    for attribute in attributes:
         for value in sorted({row[attribute] for row in rows}):
             conditions = [{"attribute": attribute, "value": value}]
             add_interval(world_mask(worlds, conditions), probability(rows, conditions))
@@ -291,9 +317,12 @@ def metadata():
     data = load_dataset()
     return jsonify(
         {
+            "attributes": data["attributes"],
+            "numericAttributes": data["numericAttributes"],
+            "categoricalAttributes": data["categoricalAttributes"],
             "total": data["total"],
             "domains": data["domains"],
-            "labels": LABELS,
+            "labels": data["labels"],
             "thresholds": data["thresholds"],
         }
     )
@@ -303,12 +332,12 @@ def metadata():
 def query():
     try:
         payload = request.get_json(force=True)
-        base = valid_conditions(payload.get("conditions", []))
-        target = valid_conditions([payload.get("target", {})])[0]
+        data = load_dataset()
+        base = valid_conditions(payload.get("conditions", []), data["domains"])
+        target = valid_conditions([payload.get("target", {})], data["domains"])[0]
     except ValueError as error:
         return jsonify({"ok": False, "error": str(error)}), 400
 
-    data = load_dataset()
     rows = data["rows"]
     both = [*base, target]
     p_a = probability(rows, [target])

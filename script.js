@@ -13,6 +13,11 @@ const linearProgram = document.querySelector("#linearProgram");
 
 let domains = {};
 let labels = {};
+let attributes = [];
+
+function firstAttributeExcept(attribute) {
+  return attributes.find((item) => item !== attribute) || attributes[0];
+}
 
 function fillSelect(select, values, labeler = (value) => value) {
   select.innerHTML = "";
@@ -128,18 +133,20 @@ async function boot() {
   const metadata = await response.json();
   domains = metadata.domains;
   labels = metadata.labels;
+  attributes = metadata.attributes;
 
-  fillSelect(targetAttribute, Object.keys(domains), (item) => labels[item] || item);
-  targetAttribute.value = "label";
+  fillSelect(targetAttribute, attributes, (item) => labels[item] || item);
+  targetAttribute.value = attributes.includes("label") ? "label" : attributes[attributes.length - 1];
   fillValueSelect(targetAttribute, targetValue);
-  targetValue.value = "rice";
 
   targetAttribute.addEventListener("change", () => fillValueSelect(targetAttribute, targetValue));
   addConditionButton.addEventListener("click", () => createConditionRow());
   runQueryButton.addEventListener("click", runQuery);
 
-  createConditionRow("ph", "acido");
-  createConditionRow("rainfall", "alto");
+  const firstCondition = firstAttributeExcept(targetAttribute.value);
+  createConditionRow(firstCondition, domains[firstCondition]?.[0]);
+  const secondCondition = attributes.find((item) => item !== targetAttribute.value && item !== firstCondition);
+  if (secondCondition) createConditionRow(secondCondition, domains[secondCondition]?.[0]);
   datasetStatus.textContent = `${metadata.total} registros carregados`;
   runQuery();
 }
