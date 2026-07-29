@@ -1,0 +1,41 @@
+{
+  "ok": true,
+  "processing": {
+    "startedAt": "2026-07-29T11:46:26.492048+00:00",
+    "finishedAt": "2026-07-29T11:46:31.293197+00:00",
+    "durationSeconds": 4.800781499943696,
+    "durationMilliseconds": 4800.781
+  },
+  "target": {
+    "attribute": "label",
+    "value": "rice"
+  },
+  "conditions": [
+    {
+      "attribute": "ph",
+      "value": "acido"
+    },
+    {
+      "attribute": "rainfall",
+      "value": "alto"
+    }
+  ],
+  "support": 0.015,
+  "confidence": 0.15137614678899083,
+  "lift": 3.3302752293577984,
+  "pA": 0.045454545454545456,
+  "pB": 0.09909090909090909,
+  "countBoth": 33,
+  "countBase": 218,
+  "total": 2200,
+  "linear": {
+    "ok": true,
+    "lower": 0.13999999999999999,
+    "upper": 0.16326530612244897,
+    "variables": 466,
+    "constraints": 94,
+    "solver": "scipy.optimize.linprog highs"
+  },
+  "linearProgram": "Variaveis:\n  x_w >= 0 para cada mundo possivel w da base categorizada\n\nRestricao de normalizacao:\n  soma(x_w) = 1\n\nRestricoes extraidas da base:\n  0.044 <= P(A) = soma(x_w onde label=rice) <= 0.046\n  0.098 <= P(B) = soma(x_w onde ph=acido, rainfall=alto) <= 0.100\n  0.014 <= P(A e B) = soma(x_w onde ph=acido, rainfall=alto, label=rice) <= 0.016\n\nConsulta:\n  P(A | B) = P(A e B) / P(B)\n\nResolucao linear:\n  A razao P(A e B) / P(B) e convertida por Charnes-Cooper:\n  x_w = y_w / t\n  P(B) em y e fixado como 1\n  minimizar soma(y_w onde A e B) para o limite inferior\n  maximizar soma(y_w onde A e B) para o limite superior\n\nSolver: scipy.optimize.linprog highs\nVariaveis: 466\nRestricoes: 94\nIntervalo retornado: 0.140 <= P(A | B) <= 0.163",
+  "conclusion": "Para a regra ph=acido, rainfall=alto -> label=rice, foram encontrados 33 casos favoraveis dentro de 218 casos que satisfazem B. A confianca empirica e 0.151, considerada baixa, e o suporte e 0.015. O lift de 3.330 indica associacao positiva. Pelo modelo linear, P(A | B) fica entre 0.140 e 0.163."
+}
