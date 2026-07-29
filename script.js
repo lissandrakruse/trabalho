@@ -259,7 +259,7 @@ async function generateReport() {
 
 async function compareSolver() {
   compareSolverButton.disabled = true;
-  compareSolverButton.textContent = "Comparando...";
+  compareSolverButton.textContent = "Resolvendo...";
   solverCompareStatus.textContent = "Executando solver";
   solverComparison.innerHTML = "";
 
@@ -277,7 +277,7 @@ async function compareSolver() {
     solverComparison.innerHTML = `<p><strong>Erro:</strong> ${escapeHtml(error.message)}</p>`;
   } finally {
     compareSolverButton.disabled = false;
-    compareSolverButton.textContent = "Comparar solver separado";
+    compareSolverButton.textContent = "Resolver Solver Separado";
   }
 }
 
