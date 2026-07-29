@@ -499,6 +499,12 @@ def format_report_probability(value: float | None) -> str:
     return fmt_probability(value).replace(".", ",")
 
 
+def format_report_number(value: float | None) -> str:
+    if value is None:
+        return "-"
+    return f"{value:.3f}".replace(".", ",")
+
+
 def write_query_report(result: dict[str, Any]) -> None:
     try:
         from reportlab.lib import colors
@@ -573,7 +579,7 @@ def write_query_report(result: dict[str, Any]) -> None:
                 ["P(B)", format_report_probability(result["pB"])],
                 ["Suporte P(A e B)", format_report_probability(result["support"])],
                 ["Confianca P(A | B)", format_report_probability(result["confidence"])],
-                ["Lift", format_report_probability(result["lift"])],
+                ["Lift", format_report_number(result["lift"])],
                 ["Instancias", f"{result['countBoth']} / {result['countBase']}"],
                 ["Intervalo linear", interval],
                 ["Inicio", result["processing"]["startedAt"]],
