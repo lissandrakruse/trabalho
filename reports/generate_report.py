@@ -132,6 +132,16 @@ def interval_chart(empirical: float | None, lower: float | None, upper: float | 
     return drawing
 
 
+def interval_dict(value: float) -> dict[str, float]:
+    rounded = round(value, 3)
+    return {
+        "valor_original": value,
+        "valor_arredondado_3_casas": rounded,
+        "limite_inferior": max(0.0, rounded - 0.001),
+        "limite_superior": min(1.0, rounded + 0.001),
+    }
+
+
 def page_style(canvas, doc) -> None:
     canvas.saveState()
     width, height = A4
@@ -164,6 +174,10 @@ def build_report() -> None:
     lp_text = linear_program_text(target, conditions, p_a, p_b, p_ab, lp)
     lp_lower = lp.get("lower") if lp.get("ok") else None
     lp_upper = lp.get("upper") if lp.get("ok") else None
+    count_a = probability_count(rows, [target])
+    count_b = probability_count(rows, conditions)
+    count_ab = probability_count(rows, both)
+    total = data["total"]
 
     JSON_OUTPUT.write_text(
         json.dumps(
@@ -171,6 +185,14 @@ def build_report() -> None:
                 "consulta": "P(label=rice | ph=acido, rainfall=alto)",
                 "eventoA": target,
                 "condicoesB": conditions,
+                "dataset": {
+                    "total_registros": total,
+                    "atributos": data["attributes"],
+                    "atributos_numericos_categorizados": data["numericAttributes"],
+                    "atributos_categoricos_originais": data["categoricalAttributes"],
+                    "mundos_observados": len(data["worlds"]),
+                    "limiares_discretizacao": data["thresholds"],
+                },
                 "probabilidades": {
                     "pA": p_a,
                     "pB": p_b,
@@ -179,10 +201,90 @@ def build_report() -> None:
                     "lift": lift,
                 },
                 "contagens": {
-                    "total": data["total"],
-                    "instancias_B": probability_count(rows, conditions),
-                    "instancias_A_e_B": probability_count(rows, both),
+                    "total": total,
+                    "instancias_A": count_a,
+                    "instancias_B": count_b,
+                    "instancias_A_e_B": count_ab,
                     "mundos_observados": len(data["worlds"]),
+                },
+                "algoritmosMatematicos": {
+                    "discretizacao": {
+                        "descricao": "Colunas numericas sao convertidas em categorias para que a base fique categorica.",
+                        "regra_geral": "valor <= Q1 => baixo; valor <= Q2 => medio; valor > Q2 => alto",
+                        "regra_ph": "ph < 6 => acido; ph <= 7.5 => neutro; ph > 7.5 => alcalino",
+                        "limiares_usados": data["thresholds"],
+                    },
+                    "probabilidade_marginal_A": {
+                        "formula": "P(A) = contagem(A) / N",
+                        "evento": target,
+                        "contagem_evento": count_a,
+                        "total": total,
+                        "calculo": f"{count_a} / {total}",
+                        "resultado": p_a,
+                        "intervalo_linear": interval_dict(p_a),
+                    },
+                    "probabilidade_marginal_B": {
+                        "formula": "P(B) = contagem(B) / N",
+                        "evento": conditions,
+                        "contagem_evento": count_b,
+                        "total": total,
+                        "calculo": f"{count_b} / {total}",
+                        "resultado": p_b,
+                        "intervalo_linear": interval_dict(p_b),
+                    },
+                    "probabilidade_conjunta_A_e_B": {
+                        "formula": "P(A e B) = contagem(A e B) / N",
+                        "evento": both,
+                        "contagem_evento": count_ab,
+                        "total": total,
+                        "calculo": f"{count_ab} / {total}",
+                        "resultado": p_ab,
+                        "intervalo_linear": interval_dict(p_ab),
+                    },
+                    "suporte": {
+                        "formula": "suporte(B -> A) = P(A e B)",
+                        "calculo": f"{count_ab} / {total}",
+                        "resultado": p_ab,
+                        "interpretacao": "Frequencia da regra completa na base.",
+                    },
+                    "confianca_ou_precisao": {
+                        "formula": "confianca(B -> A) = P(A | B) = P(A e B) / P(B)",
+                        "calculo_por_probabilidades": f"{p_ab} / {p_b}",
+                        "calculo_por_contagens": f"{count_ab} / {count_b}",
+                        "resultado": confidence,
+                        "interpretacao": "Entre os registros que satisfazem B, proporcao que tambem satisfaz A.",
+                    },
+                    "lift": {
+                        "formula": "lift(B -> A) = P(A | B) / P(A)",
+                        "calculo": f"{confidence} / {p_a}",
+                        "resultado": lift,
+                        "interpretacao": "Compara a regra com a probabilidade marginal de A.",
+                    },
+                    "variaveis_lineares": {
+                        "formula": "x_w >= 0 para cada mundo possivel w; soma(x_w) = 1",
+                        "quantidade_variaveis": lp.get("variables"),
+                        "mundos_observados": len(data["worlds"]),
+                    },
+                    "restricoes_lineares": {
+                        "formula": "L <= soma(x_w onde evento ocorre) <= U",
+                        "quantidade_restricoes": lp.get("constraints"),
+                        "restricoes_da_consulta": {
+                            "P(A)": interval_dict(p_a),
+                            "P(B)": interval_dict(p_b),
+                            "P(A_e_B)": interval_dict(p_ab),
+                        },
+                    },
+                    "programacao_linear_fracionaria": {
+                        "formula_original": "P(A | B) = P(A e B) / P(B)",
+                        "transformacao": "Charnes-Cooper",
+                        "ideia": "Substituir x_w por y_w/t e fixar P(B) em y como 1 para tornar o objetivo linear.",
+                        "objetivo_minimo": "minimizar soma(y_w onde A e B)",
+                        "objetivo_maximo": "maximizar soma(y_w onde A e B)",
+                        "resultado_intervalar": {
+                            "minimo": lp_lower,
+                            "maximo": lp_upper,
+                        },
+                    },
                 },
                 "programacaoLinear": lp,
             },

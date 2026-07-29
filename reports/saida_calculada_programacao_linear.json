@@ -14,6 +14,62 @@
       "value": "alto"
     }
   ],
+  "dataset": {
+    "total_registros": 2200,
+    "atributos": [
+      "N",
+      "P",
+      "K",
+      "temperature",
+      "humidity",
+      "ph",
+      "rainfall",
+      "label"
+    ],
+    "atributos_numericos_categorizados": [
+      "N",
+      "P",
+      "K",
+      "temperature",
+      "humidity",
+      "ph",
+      "rainfall"
+    ],
+    "atributos_categoricos_originais": [
+      "label"
+    ],
+    "mundos_observados": 466,
+    "limiares_discretizacao": {
+      "N": {
+        "low": 27.0,
+        "high": 69.0
+      },
+      "P": {
+        "low": 37.0,
+        "high": 61.0
+      },
+      "K": {
+        "low": 23.0,
+        "high": 44.0
+      },
+      "temperature": {
+        "low": 23.79746068,
+        "high": 27.552973600000005
+      },
+      "humidity": {
+        "low": 65.44340921,
+        "high": 84.96771717
+      },
+      "ph": {
+        "low": 6.135025006,
+        "high": 6.738993954
+      },
+      "rainfall": {
+        "low": 71.16331975,
+        "high": 110.9653137
+      }
+    }
+  },
   "probabilidades": {
     "pA": 0.045454545454545456,
     "pB": 0.09909090909090909,
@@ -23,9 +79,173 @@
   },
   "contagens": {
     "total": 2200,
+    "instancias_A": 100,
     "instancias_B": 218,
     "instancias_A_e_B": 33,
     "mundos_observados": 466
+  },
+  "algoritmosMatematicos": {
+    "discretizacao": {
+      "descricao": "Colunas numericas sao convertidas em categorias para que a base fique categorica.",
+      "regra_geral": "valor <= Q1 => baixo; valor <= Q2 => medio; valor > Q2 => alto",
+      "regra_ph": "ph < 6 => acido; ph <= 7.5 => neutro; ph > 7.5 => alcalino",
+      "limiares_usados": {
+        "N": {
+          "low": 27.0,
+          "high": 69.0
+        },
+        "P": {
+          "low": 37.0,
+          "high": 61.0
+        },
+        "K": {
+          "low": 23.0,
+          "high": 44.0
+        },
+        "temperature": {
+          "low": 23.79746068,
+          "high": 27.552973600000005
+        },
+        "humidity": {
+          "low": 65.44340921,
+          "high": 84.96771717
+        },
+        "ph": {
+          "low": 6.135025006,
+          "high": 6.738993954
+        },
+        "rainfall": {
+          "low": 71.16331975,
+          "high": 110.9653137
+        }
+      }
+    },
+    "probabilidade_marginal_A": {
+      "formula": "P(A) = contagem(A) / N",
+      "evento": {
+        "attribute": "label",
+        "value": "rice"
+      },
+      "contagem_evento": 100,
+      "total": 2200,
+      "calculo": "100 / 2200",
+      "resultado": 0.045454545454545456,
+      "intervalo_linear": {
+        "valor_original": 0.045454545454545456,
+        "valor_arredondado_3_casas": 0.045,
+        "limite_inferior": 0.044,
+        "limite_superior": 0.046
+      }
+    },
+    "probabilidade_marginal_B": {
+      "formula": "P(B) = contagem(B) / N",
+      "evento": [
+        {
+          "attribute": "ph",
+          "value": "acido"
+        },
+        {
+          "attribute": "rainfall",
+          "value": "alto"
+        }
+      ],
+      "contagem_evento": 218,
+      "total": 2200,
+      "calculo": "218 / 2200",
+      "resultado": 0.09909090909090909,
+      "intervalo_linear": {
+        "valor_original": 0.09909090909090909,
+        "valor_arredondado_3_casas": 0.099,
+        "limite_inferior": 0.098,
+        "limite_superior": 0.1
+      }
+    },
+    "probabilidade_conjunta_A_e_B": {
+      "formula": "P(A e B) = contagem(A e B) / N",
+      "evento": [
+        {
+          "attribute": "ph",
+          "value": "acido"
+        },
+        {
+          "attribute": "rainfall",
+          "value": "alto"
+        },
+        {
+          "attribute": "label",
+          "value": "rice"
+        }
+      ],
+      "contagem_evento": 33,
+      "total": 2200,
+      "calculo": "33 / 2200",
+      "resultado": 0.015,
+      "intervalo_linear": {
+        "valor_original": 0.015,
+        "valor_arredondado_3_casas": 0.015,
+        "limite_inferior": 0.013999999999999999,
+        "limite_superior": 0.016
+      }
+    },
+    "suporte": {
+      "formula": "suporte(B -> A) = P(A e B)",
+      "calculo": "33 / 2200",
+      "resultado": 0.015,
+      "interpretacao": "Frequencia da regra completa na base."
+    },
+    "confianca_ou_precisao": {
+      "formula": "confianca(B -> A) = P(A | B) = P(A e B) / P(B)",
+      "calculo_por_probabilidades": "0.015 / 0.09909090909090909",
+      "calculo_por_contagens": "33 / 218",
+      "resultado": 0.15137614678899083,
+      "interpretacao": "Entre os registros que satisfazem B, proporcao que tambem satisfaz A."
+    },
+    "lift": {
+      "formula": "lift(B -> A) = P(A | B) / P(A)",
+      "calculo": "0.15137614678899083 / 0.045454545454545456",
+      "resultado": 3.3302752293577984,
+      "interpretacao": "Compara a regra com a probabilidade marginal de A."
+    },
+    "variaveis_lineares": {
+      "formula": "x_w >= 0 para cada mundo possivel w; soma(x_w) = 1",
+      "quantidade_variaveis": 466,
+      "mundos_observados": 466
+    },
+    "restricoes_lineares": {
+      "formula": "L <= soma(x_w onde evento ocorre) <= U",
+      "quantidade_restricoes": 94,
+      "restricoes_da_consulta": {
+        "P(A)": {
+          "valor_original": 0.045454545454545456,
+          "valor_arredondado_3_casas": 0.045,
+          "limite_inferior": 0.044,
+          "limite_superior": 0.046
+        },
+        "P(B)": {
+          "valor_original": 0.09909090909090909,
+          "valor_arredondado_3_casas": 0.099,
+          "limite_inferior": 0.098,
+          "limite_superior": 0.1
+        },
+        "P(A_e_B)": {
+          "valor_original": 0.015,
+          "valor_arredondado_3_casas": 0.015,
+          "limite_inferior": 0.013999999999999999,
+          "limite_superior": 0.016
+        }
+      }
+    },
+    "programacao_linear_fracionaria": {
+      "formula_original": "P(A | B) = P(A e B) / P(B)",
+      "transformacao": "Charnes-Cooper",
+      "ideia": "Substituir x_w por y_w/t e fixar P(B) em y como 1 para tornar o objetivo linear.",
+      "objetivo_minimo": "minimizar soma(y_w onde A e B)",
+      "objetivo_maximo": "maximizar soma(y_w onde A e B)",
+      "resultado_intervalar": {
+        "minimo": 0.13999999999999999,
+        "maximo": 0.16326530612244897
+      }
+    }
   },
   "programacaoLinear": {
     "ok": true,
