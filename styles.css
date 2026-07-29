@@ -286,6 +286,58 @@ select {
   color: #17352f;
 }
 
+.solver-demo {
+  margin-bottom: 14px;
+  padding: 14px;
+  border: 1px solid #cfd9df;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #27343c;
+}
+
+.solver-demo h3 {
+  margin: 0 0 8px;
+  color: #17352f;
+  font-size: 16px;
+}
+
+.solver-demo p {
+  margin: 0;
+  color: #43535d;
+  line-height: 1.5;
+}
+
+.solver-demo-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin: 12px 0;
+}
+
+.solver-demo-grid div {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid #dbe5e9;
+  border-radius: 8px;
+  background: #f7faf9;
+}
+
+.solver-demo-grid span,
+.solver-demo-grid small {
+  display: block;
+  color: #60717c;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.solver-demo-grid strong {
+  display: block;
+  margin: 5px 0 3px;
+  color: #17352f;
+  font-size: 16px;
+  overflow-wrap: anywhere;
+}
+
 .solver-comparison p {
   margin-bottom: 12px;
   color: #43535d;
@@ -406,7 +458,8 @@ select {
   }
 
   .tab-list,
-  .math-model {
+  .math-model,
+  .solver-demo-grid {
     grid-template-columns: 1fr;
   }
 }

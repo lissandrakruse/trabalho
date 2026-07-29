@@ -86,6 +86,10 @@
             Ele resolve o programa linear depois da transforma&ccedil;&atilde;o de Charnes-Cooper.
             Este bot&atilde;o chama o m&oacute;dulo separado <strong>scripts/solve_query.py</strong> e compara sua sa&iacute;da com o c&aacute;lculo principal da interface.
           </div>
+          <div class="solver-demo" id="solverDemo">
+            <h3>Demonstra&ccedil;&atilde;o do solver</h3>
+            <p>Ao executar, o sistema envia a mesma consulta escolhida acima para o solver separado. Ele monta as vari&aacute;veis <strong>x_w</strong>, aplica as restri&ccedil;&otilde;es probabil&iacute;sticas, transforma a raz&atilde;o por Charnes-Cooper e chama o HiGHS para minimizar e maximizar <strong>P(A | B)</strong>.</p>
+          </div>
           <div class="solver-comparison" id="solverComparison"></div>
         </section>
 

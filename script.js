@@ -15,6 +15,7 @@ const liftValue = document.querySelector("#liftValue");
 const countValue = document.querySelector("#countValue");
 const probabilityText = document.querySelector("#probabilityText");
 const solverCompareStatus = document.querySelector("#solverCompareStatus");
+const solverDemo = document.querySelector("#solverDemo");
 const solverComparison = document.querySelector("#solverComparison");
 const linearProgram = document.querySelector("#linearProgram");
 const mathModel = document.querySelector("#mathModel");
@@ -138,6 +139,13 @@ function setActiveTab(activeButton) {
 }
 
 function renderSolverComparison(result) {
+  const solverResult = result.standaloneSolver;
+  const linear = solverResult.linear || {};
+  const targetText = escapeHtml(eventLabel([solverResult.target]));
+  const conditionsText = escapeHtml(eventLabel(solverResult.conditions));
+  const intervalTextValue = linear.ok
+    ? `${fmt(linear.lower)} <= P(A | B) <= ${fmt(linear.upper)}`
+    : escapeHtml(linear.error || "Intervalo nao calculado");
   const labels = {
     pA: "P(A)",
     pB: "P(B)",
@@ -158,6 +166,17 @@ function renderSolverComparison(result) {
   });
 
   solverCompareStatus.textContent = result.comparison.allMatch ? "Resultados iguais" : "Diferencas encontradas";
+  solverDemo.innerHTML = [
+    `<h3>Solver executado com sucesso</h3>`,
+    `<p>Consulta enviada ao solver separado: <strong>P(${targetText} | ${conditionsText})</strong>.</p>`,
+    `<div class="solver-demo-grid">`,
+    `<div><span>Solver</span><strong>HiGHS</strong><small>via scipy.optimize.linprog</small></div>`,
+    `<div><span>Transformacao</span><strong>Charnes-Cooper</strong><small>razao condicional para LP</small></div>`,
+    `<div><span>Modelo</span><strong>${fmtCompare(linear.variables)}</strong><small>variaveis x_w</small></div>`,
+    `<div><span>Restricoes</span><strong>${fmtCompare(linear.constraints)}</strong><small>marginais, conjunta e normalizacao</small></div>`,
+    `</div>`,
+    `<p>Resultado do solver separado: <strong>${intervalTextValue}</strong>. O painel abaixo compara esse resultado com o calculo principal do projeto.</p>`,
+  ].join("");
   solverComparison.innerHTML = [
     `<p>${escapeHtml(result.message)}</p>`,
     `<table><thead><tr><th>Metrica</th><th>Projeto</th><th>Solver separado</th><th>Diferenca</th><th>Status</th></tr></thead><tbody>`,
