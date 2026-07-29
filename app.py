@@ -322,6 +322,65 @@ def linear_program_text(
     return "\n".join(lines)
 
 
+def conclusion_text(
+    target: dict[str, str],
+    base: list[dict[str, str]],
+    support: float,
+    confidence: float | None,
+    lift: float | None,
+    p_b: float,
+    count_base: int,
+    count_both: int,
+    lp: dict[str, Any],
+) -> str:
+    target_label = event_key([target])
+    base_label = event_key(base)
+    if count_base == 0 or p_b <= 0:
+        return (
+            f"Nao foi possivel estimar P({target_label} | {base_label}) porque nenhuma "
+            "linha do dataset satisfaz todas as afirmacoes escolhidas. A conclusao "
+            "tecnica e que essa combinacao nao tem evidencia empirica na base; reduza "
+            "a quantidade de condicoes ou escolha valores mais frequentes."
+        )
+
+    confidence_label = "baixa"
+    if confidence is not None and confidence >= 0.7:
+        confidence_label = "alta"
+    elif confidence is not None and confidence >= 0.3:
+        confidence_label = "moderada"
+
+    lift_sentence = "O lift nao foi calculado."
+    if lift is not None:
+        if lift > 1.2:
+            lift_sentence = (
+                f"O lift de {lift:.3f} indica associacao positiva: o evento A fica mais provavel "
+                "quando as condicoes B ocorrem."
+            )
+        elif lift < 0.8:
+            lift_sentence = (
+                f"O lift de {lift:.3f} indica associacao negativa: o evento A fica menos provavel "
+                "quando as condicoes B ocorrem."
+            )
+        else:
+            lift_sentence = (
+                f"O lift de {lift:.3f} indica associacao fraca ou proxima da independencia."
+            )
+
+    interval_sentence = ""
+    if lp.get("ok"):
+        interval_sentence = (
+            f" Pelo modelo linear intervalar, P(A | B) fica entre {lp['lower']:.3f} "
+            f"e {lp['upper']:.3f}."
+        )
+
+    return (
+        f"Para a regra {base_label} -> {target_label}, foram encontrados {count_both} "
+        f"casos favoraveis dentro de {count_base} casos que satisfazem B. A confianca "
+        f"empirica e {confidence:.3f}, considerada {confidence_label}, e o suporte e "
+        f"{support:.3f}. {lift_sentence}{interval_sentence}"
+    )
+
+
 @app.get("/")
 def home():
     return send_from_directory(ROOT, "index.html")
@@ -372,9 +431,12 @@ def query():
     p_ab = probability(rows, both)
     confidence = p_ab / p_b if p_b > 0 else None
     lift = confidence / p_a if confidence is not None and p_a > 0 else None
+    count_both = probability_count(rows, both)
+    count_base = probability_count(rows, base)
     lp = solve_linear_interval(data["worlds"], rows, target, base)
     finished_at = datetime.now(timezone.utc)
     duration_seconds = time.perf_counter() - started_perf
+    conclusion = conclusion_text(target, base, p_ab, confidence, lift, p_b, count_base, count_both, lp)
 
     return jsonify(
         {
@@ -392,11 +454,12 @@ def query():
             "lift": lift,
             "pA": p_a,
             "pB": p_b,
-            "countBoth": probability_count(rows, both),
-            "countBase": probability_count(rows, base),
+            "countBoth": count_both,
+            "countBase": count_base,
             "total": data["total"],
             "linear": lp,
             "linearProgram": linear_program_text(target, base, p_a, p_b, p_ab, lp),
+            "conclusion": conclusion,
         }
     )
 

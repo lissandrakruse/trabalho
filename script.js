@@ -120,6 +120,7 @@ async function runQuery() {
       `<div><strong>Lift:</strong> ${fmt(result.lift)} compara a regra com a probabilidade marginal de A.</div>`,
       `<div><strong>Marginais:</strong> P(A)=${fmt(result.pA)} e P(B)=${fmt(result.pB)}.</div>`,
       linearInterval,
+      `<div><strong>Conclusão:</strong> ${result.conclusion}</div>`,
     ].join("");
     linearProgram.textContent = result.linearProgram;
   } catch (error) {
