@@ -1,0 +1,38 @@
+{
+  "consulta": "P(label=rice | ph=acido, rainfall=alto)",
+  "eventoA": {
+    "attribute": "label",
+    "value": "rice"
+  },
+  "condicoesB": [
+    {
+      "attribute": "ph",
+      "value": "acido"
+    },
+    {
+      "attribute": "rainfall",
+      "value": "alto"
+    }
+  ],
+  "probabilidades": {
+    "pA": 0.045454545454545456,
+    "pB": 0.09909090909090909,
+    "suporte_pAeB": 0.015,
+    "confianca_pAdadoB": 0.15137614678899083,
+    "lift": 3.3302752293577984
+  },
+  "contagens": {
+    "total": 2200,
+    "instancias_B": 218,
+    "instancias_A_e_B": 33,
+    "mundos_observados": 466
+  },
+  "programacaoLinear": {
+    "ok": true,
+    "lower": 0.13999999999999999,
+    "upper": 0.16326530612244897,
+    "variables": 466,
+    "constraints": 94,
+    "solver": "scipy.optimize.linprog highs"
+  }
+}

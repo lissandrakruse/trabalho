@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import json
 from pathlib import Path
 
 from reportlab.lib import colors
@@ -14,10 +15,12 @@ from reportlab.platypus import (
     Table,
     TableStyle,
 )
+from reportlab.graphics.shapes import Drawing, Line, Rect, String
 
 
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = ROOT / "reports" / "relatorio_saida_programacao_linear.pdf"
+JSON_OUTPUT = ROOT / "reports" / "saida_calculada_programacao_linear.json"
 sys.path.insert(0, str(ROOT))
 
 from app import (  # noqa: E402
@@ -72,6 +75,63 @@ def styled_table(rows: list[list[str]], col_widths: list[float], header_color=TE
     return table
 
 
+def metric_bar_chart(metrics: list[tuple[str, float, colors.Color]]) -> Drawing:
+    width = 460
+    height = 185
+    left = 82
+    bottom = 34
+    chart_width = 330
+    chart_height = 110
+    drawing = Drawing(width, height)
+    drawing.add(String(width / 2, height - 18, "Grafico das probabilidades calculadas", textAnchor="middle", fontSize=11, fillColor=INK))
+    drawing.add(Line(left, bottom, left, bottom + chart_height, strokeColor=INK, strokeWidth=1))
+    drawing.add(Line(left, bottom, left + chart_width, bottom, strokeColor=INK, strokeWidth=1))
+    for tick in range(0, 6):
+        value = tick / 5
+        y = bottom + value * chart_height
+        drawing.add(Line(left - 3, y, left + chart_width, y, strokeColor=GRID, strokeWidth=0.6))
+        drawing.add(String(left - 10, y - 3, f"{value:.1f}", textAnchor="end", fontSize=7.5, fillColor=MUTED))
+
+    bar_width = 42
+    gap = 34
+    for index, (label, value, color) in enumerate(metrics):
+        x = left + 22 + index * (bar_width + gap)
+        bar_height = max(1, min(value, 1) * chart_height)
+        drawing.add(Rect(x, bottom, bar_width, bar_height, fillColor=color, strokeColor=color))
+        drawing.add(String(x + bar_width / 2, bottom + bar_height + 7, f"{value:.3f}", textAnchor="middle", fontSize=8, fillColor=INK))
+        drawing.add(String(x + bar_width / 2, bottom - 15, label, textAnchor="middle", fontSize=8, fillColor=MUTED))
+    return drawing
+
+
+def interval_chart(empirical: float | None, lower: float | None, upper: float | None) -> Drawing:
+    width = 460
+    height = 125
+    left = 64
+    y = 58
+    axis_width = 350
+    drawing = Drawing(width, height)
+    drawing.add(String(width / 2, height - 18, "Intervalo da consulta condicional pelo solver", textAnchor="middle", fontSize=11, fillColor=INK))
+    drawing.add(Line(left, y, left + axis_width, y, strokeColor=INK, strokeWidth=1.2))
+    for tick in range(0, 6):
+        value = tick / 5
+        x = left + value * axis_width
+        drawing.add(Line(x, y - 4, x, y + 4, strokeColor=INK, strokeWidth=0.8))
+        drawing.add(String(x, y - 18, f"{value:.1f}", textAnchor="middle", fontSize=7.5, fillColor=MUTED))
+
+    if lower is not None and upper is not None:
+        x1 = left + max(0, min(lower, 1)) * axis_width
+        x2 = left + max(0, min(upper, 1)) * axis_width
+        drawing.add(Rect(x1, y - 7, max(2, x2 - x1), 14, fillColor=colors.HexColor("#99f6e4"), strokeColor=TEAL))
+        drawing.add(String(x1, y + 16, f"min {lower:.3f}", textAnchor="middle", fontSize=8, fillColor=TEAL_DARK))
+        drawing.add(String(x2, y + 16, f"max {upper:.3f}", textAnchor="middle", fontSize=8, fillColor=TEAL_DARK))
+
+    if empirical is not None:
+        xe = left + max(0, min(empirical, 1)) * axis_width
+        drawing.add(Line(xe, y - 18, xe, y + 22, strokeColor=colors.HexColor("#b91c1c"), strokeWidth=1.4))
+        drawing.add(String(xe, y + 31, f"empirico {empirical:.3f}", textAnchor="middle", fontSize=8, fillColor=colors.HexColor("#b91c1c")))
+    return drawing
+
+
 def page_style(canvas, doc) -> None:
     canvas.saveState()
     width, height = A4
@@ -102,6 +162,35 @@ def build_report() -> None:
     lift = confidence / p_a if confidence is not None and p_a > 0 else None
     lp = solve_linear_interval(data["worlds"], rows, target, conditions)
     lp_text = linear_program_text(target, conditions, p_a, p_b, p_ab, lp)
+    lp_lower = lp.get("lower") if lp.get("ok") else None
+    lp_upper = lp.get("upper") if lp.get("ok") else None
+
+    JSON_OUTPUT.write_text(
+        json.dumps(
+            {
+                "consulta": "P(label=rice | ph=acido, rainfall=alto)",
+                "eventoA": target,
+                "condicoesB": conditions,
+                "probabilidades": {
+                    "pA": p_a,
+                    "pB": p_b,
+                    "suporte_pAeB": p_ab,
+                    "confianca_pAdadoB": confidence,
+                    "lift": lift,
+                },
+                "contagens": {
+                    "total": data["total"],
+                    "instancias_B": probability_count(rows, conditions),
+                    "instancias_A_e_B": probability_count(rows, both),
+                    "mundos_observados": len(data["worlds"]),
+                },
+                "programacaoLinear": lp,
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
 
     styles = getSampleStyleSheet()
     title = ParagraphStyle(
@@ -237,8 +326,31 @@ def build_report() -> None:
         header_color=INK,
     )
     story.append(metrics_table)
+    story.append(Spacer(1, 0.18 * cm))
+    story.append(
+        metric_bar_chart(
+            [
+                ("P(A)", p_a, TEAL),
+                ("P(B)", p_b, colors.HexColor("#2563eb")),
+                ("Suporte", p_ab, colors.HexColor("#7c3aed")),
+                ("Confianca", confidence or 0, colors.HexColor("#b45309")),
+            ]
+        )
+    )
 
-    add_heading(story, "5. Probabilidades lineares consideradas", h2)
+    add_heading(story, "5. Grafico do intervalo linear", h2)
+    story.append(
+        Paragraph(
+            "O grafico abaixo compara o valor empirico da confianca com o intervalo "
+            "calculado pelo solver. O intervalo aparece porque as probabilidades do "
+            "dataset sao usadas como restricoes aproximadas, com arredondamento em "
+            "tres casas decimais.",
+            body,
+        )
+    )
+    story.append(interval_chart(confidence, lp_lower, lp_upper))
+
+    add_heading(story, "6. Probabilidades lineares consideradas", h2)
     story.append(
         Paragraph(
             "No modelo atual entram automaticamente as probabilidades lineares mais "
@@ -265,7 +377,7 @@ def build_report() -> None:
     )
     story.append(linear_table)
 
-    add_heading(story, "6. Programacao linear", h2)
+    add_heading(story, "7. Programacao linear", h2)
     story.append(
         Paragraph(
             "Cada mundo possivel w recebe uma variavel x_w, que representa a "
@@ -278,7 +390,7 @@ def build_report() -> None:
     )
     story.append(Paragraph(lp_text.replace("\n", "<br/>"), code))
 
-    add_heading(story, "7. Saida final apresentada ao usuario", h2)
+    add_heading(story, "8. Saida final apresentada ao usuario", h2)
     if lp.get("ok"):
         interval_text = f"{fmt(lp['lower'])} <= P(A | B) <= {fmt(lp['upper'])}"
     else:
@@ -299,7 +411,18 @@ def build_report() -> None:
         )
     )
 
-    add_heading(story, "8. Relacao com o enunciado", h2)
+    add_heading(story, "9. Arquivo de saida calculada", h2)
+    story.append(
+        Paragraph(
+            "Alem do PDF, o gerador salva um JSON com a consulta, probabilidades, "
+            "contagens e resultado do solver. Esse arquivo pode ser usado como "
+            "evidencia objetiva da execucao do sistema.",
+            body,
+        )
+    )
+    story.append(Paragraph("reports/saida_calculada_programacao_linear.json", code))
+
+    add_heading(story, "10. Relacao com o enunciado", h2)
     story.append(
         Paragraph(
             "A saida comprova que o sistema extrai conhecimento probabilistico "
