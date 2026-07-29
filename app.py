@@ -516,8 +516,17 @@ def compare_solver_result(main_result: dict[str, Any], solver_result: dict[str, 
     metrics["linearUpper"] = compare_number(main_linear.get("upper"), solver_linear.get("upper"))
     metrics["variables"] = compare_number(main_linear.get("variables"), solver_linear.get("variables"))
     metrics["constraints"] = compare_number(main_linear.get("constraints"), solver_linear.get("constraints"))
+    metrics["durationSeconds"] = compare_number(
+        main_result.get("processing", {}).get("durationSeconds"),
+        solver_result.get("processing", {}).get("durationSeconds"),
+    )
+    comparable_metrics = {
+        key: item
+        for key, item in metrics.items()
+        if key != "durationSeconds"
+    }
     return {
-        "allMatch": all(item["match"] for item in metrics.values()),
+        "allMatch": all(item["match"] for item in comparable_metrics.values()),
         "metrics": metrics,
     }
 
@@ -745,6 +754,7 @@ def write_solver_comparison_report(result: dict[str, Any]) -> None:
         "linearUpper": "Limite linear superior",
         "variables": "Variaveis",
         "constraints": "Restricoes",
+        "durationSeconds": "Tempo de resolucao (s)",
     }
     comparison = result["comparison"]
     rows = [["Metrica", "Projeto", "Solver separado", "Diferenca", "Status"]]
@@ -755,7 +765,7 @@ def write_solver_comparison_report(result: dict[str, Any]) -> None:
                 format_report_metric(item["main"]),
                 format_report_metric(item["solver"]),
                 format_report_difference(item["difference"]),
-                "Igual" if item["match"] else "Diferente",
+                "Medido" if key == "durationSeconds" else "Igual" if item["match"] else "Diferente",
             ]
         )
 

@@ -158,10 +158,11 @@ function renderSolverComparison(result) {
     linearUpper: "Limite superior",
     variables: "Variaveis",
     constraints: "Restricoes",
+    durationSeconds: "Tempo de resolucao (s)",
   };
   const rows = Object.entries(result.comparison.metrics).map(([key, item]) => {
     const difference = item.difference === null ? "-" : Number(item.difference).toExponential(2);
-    const status = item.match ? "Igual" : "Diferente";
+    const status = key === "durationSeconds" ? "Medido" : item.match ? "Igual" : "Diferente";
     return `<tr><td>${labels[key] || key}</td><td>${fmtCompare(item.main)}</td><td>${fmtCompare(item.solver)}</td><td>${difference}</td><td>${status}</td></tr>`;
   });
 
