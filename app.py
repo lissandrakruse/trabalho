@@ -162,6 +162,21 @@ def rounded_interval(value: float, width: float = 0.001) -> tuple[float, float]:
     return max(0.0, rounded - width), min(1.0, rounded + width)
 
 
+def clean_probability(value: float | None) -> float | None:
+    if value is None:
+        return None
+    if abs(value) < 1e-9:
+        return 0.0
+    return min(1.0, max(0.0, value))
+
+
+def fmt_probability(value: float | None) -> str:
+    cleaned = clean_probability(value)
+    if cleaned is None:
+        return "-"
+    return f"{cleaned:.3f}"
+
+
 def world_mask(worlds: list[dict[str, Any]], conditions: list[dict[str, str]]) -> list[float]:
     return [1.0 if matches(world["values"], conditions) else 0.0 for world in worlds]
 
@@ -250,8 +265,8 @@ def solve_linear_interval(
             "error": lower_result.message if not lower_result.success else upper_result.message,
         }
 
-    lower_hi = float(lower_result.fun)
-    upper_lo = float(-upper_result.fun)
+    lower_hi = clean_probability(float(lower_result.fun))
+    upper_lo = clean_probability(float(-upper_result.fun))
 
     return {
         "ok": True,
@@ -305,7 +320,7 @@ def linear_program_text(
                 f"Solver: {lp['solver']}",
                 f"Variaveis: {lp['variables']}",
                 f"Restricoes: {lp['constraints']}",
-                f"Intervalo retornado: {lp['lower']:.3f} <= P(A | B) <= {lp['upper']:.3f}",
+                f"Intervalo retornado: {fmt_probability(lp['lower'])} <= P(A | B) <= {fmt_probability(lp['upper'])}",
             ]
         )
     elif lp.get("reason") == "zero_denominator":
@@ -369,8 +384,8 @@ def conclusion_text(
     interval_sentence = ""
     if lp.get("ok"):
         interval_sentence = (
-            f" Pelo modelo linear intervalar, P(A | B) fica entre {lp['lower']:.3f} "
-            f"e {lp['upper']:.3f}."
+            f" Pelo modelo linear intervalar, P(A | B) fica entre {fmt_probability(lp['lower'])} "
+            f"e {fmt_probability(lp['upper'])}."
         )
 
     return (
