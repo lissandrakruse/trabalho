@@ -1069,8 +1069,22 @@ def full_linear_program():
         {
             "ok": True,
             "fileUrl": "/reports/generated/programa_linear_completo.txt",
+            "downloadUrl": "/api/linear-program/full/download",
             "message": "Programa linear completo gerado com sucesso.",
         }
+    )
+
+
+@app.get("/api/linear-program/full/download")
+def download_full_linear_program():
+    if not FULL_LINEAR_PROGRAM_PATH.exists():
+        return jsonify({"ok": False, "error": "Gere o LP completo antes de baixar o TXT."}), 404
+    return send_from_directory(
+        GENERATED_REPORT_DIR,
+        FULL_LINEAR_PROGRAM_PATH.name,
+        as_attachment=True,
+        download_name="programa_linear_completo.txt",
+        mimetype="text/plain; charset=utf-8",
     )
 
 

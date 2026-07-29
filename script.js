@@ -406,10 +406,10 @@ async function generateFullLinearProgram() {
     });
     const result = await response.json();
     if (!response.ok || !result.ok) throw new Error(result.error || "Erro ao gerar LP completo.");
-    downloadFullLinearProgramLink.href = `${result.fileUrl}?t=${Date.now()}`;
+    downloadFullLinearProgramLink.href = `${result.downloadUrl || result.fileUrl}?t=${Date.now()}`;
     downloadFullLinearProgramLink.classList.remove("is-disabled");
     downloadFullLinearProgramLink.setAttribute("aria-disabled", "false");
-    linearProgram.textContent = `${linearProgram.textContent}\n\nArquivo completo gerado: ${result.fileUrl}`;
+    linearProgram.textContent = `${linearProgram.textContent}\n\nArquivo TXT completo gerado e pronto para baixar.`;
   } catch (error) {
     linearProgram.textContent = `${linearProgram.textContent}\n\nErro ao gerar LP completo: ${error.message}`;
   } finally {
