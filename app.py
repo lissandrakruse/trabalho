@@ -592,6 +592,20 @@ def write_query_report(result: dict[str, Any]) -> None:
         Paragraph(result["conclusion"], body),
         Paragraph("Programa linear", styles["Heading2"]),
         Paragraph(result["linearProgram"].replace("\n", "<br/>"), code),
+        Paragraph("Justificativa dos intervalos", styles["Heading2"]),
+        Paragraph(
+            "As probabilidades foram representadas por intervalos para reduzir efeitos de "
+            "arredondamento e permitir modelagem consistente das restricoes lineares.",
+            body,
+        ),
+        Paragraph("Referencias bibliograficas", styles["Heading2"]),
+        Paragraph(
+            "Nilsson, N. J. Probabilistic Logic. Artificial Intelligence, 1986.<br/>"
+            "Charnes, A.; Cooper, W. W. Programming with linear fractional functionals. Naval Research Logistics Quarterly, 1962.<br/>"
+            "Tessem, B. Interval probability propagation. International Journal of Approximate Reasoning, 1992.<br/>"
+            "Artigos e materiais disponibilizados pelo professor no Classroom.",
+            body,
+        ),
     ]
 
     doc = SimpleDocTemplate(

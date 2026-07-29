@@ -37,3 +37,15 @@ O script retorna:
 - tempo de processamento
 - programa linear
 - conclusao automatica
+
+## Por que usar intervalos
+
+As probabilidades foram representadas por intervalos para reduzir efeitos de
+arredondamento e permitir modelagem consistente das restricoes lineares.
+
+## Referencias bibliograficas
+
+- Nilsson, N. J. Probabilistic Logic. Artificial Intelligence, 1986.
+- Charnes, A.; Cooper, W. W. Programming with linear fractional functionals. Naval Research Logistics Quarterly, 1962.
+- Tessem, B. Interval probability propagation. International Journal of Approximate Reasoning, 1992.
+- Artigos e materiais disponibilizados pelo professor no Classroom.
