@@ -322,8 +322,8 @@ def build_report() -> None:
             [
                 ["Solver", "Papel no projeto", "Situacao da comparacao"],
                 ["SciPy HiGHS", "Solver usado pela interface e pelo script separado.", "Executado e comparado numericamente."],
-                ["HiGHS Dual Simplex", "Referencia tecnica dentro da familia HiGHS.", "Documentado para benchmark futuro."],
-                ["HiGHS Interior Point", "Referencia tecnica dentro da familia HiGHS.", "Documentado para benchmark futuro."],
+                ["HiGHS Dual Simplex", "Metodo executado no script separado.", "Executado com a mesma consulta da interface."],
+                ["HiGHS Interior Point", "Metodo executado no script separado.", "Executado com a mesma consulta da interface."],
                 ["Gurobi", "Solver comercial de referencia para LP/MILP.", "Nao executado por licenca/deploy."],
                 ["lp_solve", "Solver livre tradicional para LP/MILP.", "Nao executado nesta versao."],
                 ["cuPDLP-C", "Solver moderno para LP em larga escala.", "Nao executado nesta versao."],

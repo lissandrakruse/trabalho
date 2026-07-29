@@ -20,6 +20,61 @@ SOLVER_COMPARISON_REPORT_PATH = GENERATED_REPORT_DIR / "relatorio_comparacao_sol
 FULL_LINEAR_PROGRAM_PATH = GENERATED_REPORT_DIR / "programa_linear_completo.txt"
 MIN_ASSOCIATION_SUPPORT = 1e-12
 MIN_ASSOCIATION_CONFIDENCE = 1e-12
+SOLVER_ENGINES = [
+    {
+        "id": "highs",
+        "name": "SciPy HiGHS",
+        "method": "highs",
+        "engine": "scipy.optimize.linprog(method='highs')",
+        "status": "Executado no projeto principal e no script separado",
+        "comparison": "Comparacao numerica ativa com os parametros da interface",
+        "notes": "Escolha automatica do HiGHS para LP apos Charnes-Cooper.",
+    },
+    {
+        "id": "highs-ds",
+        "name": "HiGHS Dual Simplex",
+        "method": "highs-ds",
+        "engine": "scipy.optimize.linprog(method='highs-ds')",
+        "status": "Executado no script separado",
+        "comparison": "Comparacao de metricas contra a mesma consulta da interface",
+        "notes": "Usa a estrategia dual simplex do HiGHS.",
+    },
+    {
+        "id": "highs-ipm",
+        "name": "HiGHS Interior Point",
+        "method": "highs-ipm",
+        "engine": "scipy.optimize.linprog(method='highs-ipm')",
+        "status": "Executado no script separado",
+        "comparison": "Comparacao de metricas contra a mesma consulta da interface",
+        "notes": "Usa o metodo de pontos interiores do HiGHS.",
+    },
+]
+DOCUMENTED_SOLVERS = [
+    {
+        "id": "gurobi",
+        "name": "Gurobi",
+        "engine": "gurobipy",
+        "status": "Comparacao documental",
+        "comparison": "Nao executado no Render por depender de instalacao/licenca",
+        "notes": "Solver comercial forte para LP/MILP; referencia de benchmark futuro.",
+    },
+    {
+        "id": "lp-solve",
+        "name": "lp_solve",
+        "engine": "lp_solve",
+        "status": "Comparacao documental",
+        "comparison": "Nao executado no Render nesta versao",
+        "notes": "Solver livre tradicional para LP/MILP; util como comparacao externa futura.",
+    },
+    {
+        "id": "cupdlp-c",
+        "name": "cuPDLP-C",
+        "engine": "COPT-Public/cuPDLP-C",
+        "status": "Comparacao documental",
+        "comparison": "Nao executado no Render nesta versao",
+        "notes": "Referencia moderna para LP em larga escala.",
+    },
+]
 KNOWN_LABELS = {
     "N": "Nitrogenio",
     "P": "Fosforo",
@@ -355,6 +410,8 @@ def solve_linear_interval(
     rows: list[dict[str, str]],
     target: dict[str, str],
     base: list[dict[str, str]],
+    solver_method: str = "highs",
+    solver_name: str = "SciPy HiGHS",
 ) -> dict[str, Any]:
     denominator_probability = probability(rows, base)
     denominator_count = probability_count(rows, base)
@@ -404,7 +461,7 @@ def solve_linear_interval(
             A_eq=transformed_a_eq,
             b_eq=transformed_b_eq,
             bounds=transformed_bounds,
-            method="highs",
+            method=solver_method,
         )
 
     lower_result = optimize([*numerator_mask, 0.0])
@@ -431,7 +488,9 @@ def solve_linear_interval(
             "associationRule": sum(1 for item in records if "association_rule" in item["kind"]),
             "selected": sum(1 for item in records if item["kind"].startswith("selected")),
         },
-        "solver": "scipy.optimize.linprog highs",
+        "solver": f"scipy.optimize.linprog {solver_method}",
+        "solverMethod": solver_method,
+        "solverName": solver_name,
     }
 
 
@@ -770,7 +829,11 @@ def metadata():
     )
 
 
-def compute_query(payload: dict[str, Any]) -> dict[str, Any]:
+def compute_query(
+    payload: dict[str, Any],
+    solver_method: str = "highs",
+    solver_name: str = "SciPy HiGHS",
+) -> dict[str, Any]:
     started_at = datetime.now(timezone.utc)
     started_perf = time.perf_counter()
     data = load_dataset()
@@ -787,7 +850,7 @@ def compute_query(payload: dict[str, Any]) -> dict[str, Any]:
     count_a = probability_count(rows, [target])
     count_both = probability_count(rows, both)
     count_base = probability_count(rows, base)
-    lp = solve_linear_interval(data["worlds"], rows, target, base)
+    lp = solve_linear_interval(data["worlds"], rows, target, base, solver_method, solver_name)
     classification = classification_metrics(count_a, count_base, count_both, data["total"])
     finished_at = datetime.now(timezone.utc)
     duration_seconds = time.perf_counter() - started_perf
@@ -905,50 +968,34 @@ def compare_solver_timing(main_result: dict[str, Any], solver_result: dict[str, 
 
 
 def solver_catalog() -> list[dict[str, str]]:
-    return [
-        {
-            "name": "SciPy HiGHS",
-            "engine": "scipy.optimize.linprog(method='highs')",
-            "status": "Executado no projeto principal e no script separado",
-            "comparison": "Comparacao numerica ativa: API Flask x scripts/solve_query.py",
-            "notes": "Solver aberto, compativel com Render e adequado para LP apos Charnes-Cooper.",
-        },
-        {
-            "name": "HiGHS Dual Simplex",
-            "engine": "SciPy/HiGHS com estrategia simplex dual",
-            "status": "Referencia tecnica do HiGHS",
-            "comparison": "Nao executado como engine separada nesta versao",
-            "notes": "Opcao classica para LP; pode ser ativada futuramente com configuracao especifica do solver.",
-        },
-        {
-            "name": "HiGHS Interior Point",
-            "engine": "SciPy/HiGHS com metodo de pontos interiores",
-            "status": "Referencia tecnica do HiGHS",
-            "comparison": "Nao executado como engine separada nesta versao",
-            "notes": "Boa alternativa para comparar tempo em problemas maiores.",
-        },
-        {
-            "name": "Gurobi",
-            "engine": "gurobipy",
-            "status": "Comparacao documental",
-            "comparison": "Nao executado no Render por depender de instalacao/licenca",
-            "notes": "Solver comercial muito forte para LP/MILP; citado como referencia de benchmark futuro.",
-        },
-        {
-            "name": "lp_solve",
-            "engine": "lp_solve",
-            "status": "Comparacao documental",
-            "comparison": "Nao executado no Render nesta versao",
-            "notes": "Solver livre tradicional para LP/MILP; util como comparacao externa futura.",
-        },
-        {
-            "name": "cuPDLP-C",
-            "engine": "COPT-Public/cuPDLP-C",
-            "status": "Comparacao documental",
-            "comparison": "Nao executado no Render nesta versao",
-            "notes": "Referencia moderna para LP em larga escala, especialmente em cenarios de alto desempenho.",
-        },
-    ]
+    return [*SOLVER_ENGINES, *DOCUMENTED_SOLVERS]
+
+
+def solver_engine_summary(
+    engine: dict[str, str],
+    main_result: dict[str, Any],
+    solver_result: dict[str, Any],
+) -> dict[str, Any]:
+    comparison = compare_solver_result(main_result, solver_result)
+    linear = solver_result.get("linear", {})
+    return {
+        "id": engine["id"],
+        "name": engine["name"],
+        "method": engine["method"],
+        "status": "ok" if linear.get("ok") else "erro",
+        "pA": solver_result.get("pA"),
+        "pB": solver_result.get("pB"),
+        "support": solver_result.get("support"),
+        "confidence": solver_result.get("confidence"),
+        "lift": solver_result.get("lift"),
+        "lower": linear.get("lower"),
+        "upper": linear.get("upper"),
+        "variables": linear.get("variables"),
+        "constraints": linear.get("constraints"),
+        "durationSeconds": solver_result.get("processing", {}).get("durationSeconds"),
+        "allMatch": comparison["allMatch"],
+        "error": linear.get("error"),
+    }
 
 
 def build_solver_comparison(payload: dict[str, Any]) -> dict[str, Any]:
@@ -959,16 +1006,35 @@ def build_solver_comparison(payload: dict[str, Any]) -> dict[str, Any]:
     solver_data = standalone_solver.load_dataset(standalone_solver.DEFAULT_DATASET)
     solver_target = standalone_solver.validate_conditions([main_result["target"]], solver_data["domains"])[0]
     solver_conditions = standalone_solver.validate_conditions(main_result["conditions"], solver_data["domains"])
-    solver_result = standalone_solver.compute_query(solver_data, solver_target, solver_conditions)
+    engine_results = []
+    default_solver_result = None
+    for engine in SOLVER_ENGINES:
+        solver_result = standalone_solver.compute_query(
+            solver_data,
+            solver_target,
+            solver_conditions,
+            solver_method=engine["method"],
+            solver_name=engine["name"],
+        )
+        if engine["id"] == "highs":
+            default_solver_result = solver_result
+        engine_results.append(solver_engine_summary(engine, main_result, solver_result))
+
+    solver_result = default_solver_result or standalone_solver.compute_query(
+        solver_data,
+        solver_target,
+        solver_conditions,
+    )
 
     return {
         "ok": True,
         "main": main_result,
         "standaloneSolver": solver_result,
+        "solverEngineResults": engine_results,
         "comparison": compare_solver_result(main_result, solver_result),
         "timing": compare_solver_timing(main_result, solver_result),
         "solverCatalog": solver_catalog(),
-        "message": "Os mesmos dados da consulta foram resolvidos pelo solver separado scripts/solve_query.py e comparados com o projeto.",
+        "message": "Os mesmos dados da consulta foram resolvidos pelo script separado com 3 metodos HiGHS e comparados com o projeto.",
     }
 
 
@@ -1273,6 +1339,43 @@ def write_solver_comparison_report(result: dict[str, Any]) -> None:
         )
     )
 
+    engine_rows = [["Solver", "Suporte", "Confianca", "Lift", "Intervalo", "Tempo (s)", "Status"]]
+    for engine in result.get("solverEngineResults", []):
+        interval = (
+            f"{format_report_metric(engine.get('lower'))} - {format_report_metric(engine.get('upper'))}"
+            if engine.get("status") == "ok"
+            else engine.get("error", "Erro")
+        )
+        engine_rows.append(
+            [
+                engine["name"],
+                format_report_metric(engine.get("support")),
+                format_report_metric(engine.get("confidence")),
+                format_report_metric(engine.get("lift")),
+                interval,
+                format_report_metric(engine.get("durationSeconds")),
+                "Igual ao projeto" if engine.get("allMatch") else "Diferente",
+            ]
+        )
+    engine_table = Table(
+        engine_rows,
+        colWidths=[3.6 * cm, 1.8 * cm, 2.0 * cm, 1.7 * cm, 2.8 * cm, 1.8 * cm, 2.0 * cm],
+    )
+    engine_table.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0f766e")),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#e5e7eb")),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("FONTSIZE", (0, 0), (-1, -1), 7.2),
+                ("LEADING", (0, 0), (-1, -1), 8.8),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f7faf9")]),
+            ]
+        )
+    )
+
     main_result = result["main"]
     target = event_key([main_result["target"]])
     conditions = event_key(main_result["conditions"])
@@ -1304,12 +1407,16 @@ def write_solver_comparison_report(result: dict[str, Any]) -> None:
             body,
         ),
         Paragraph(
-            "Nesta versao, a comparacao executavel e feita entre o calculo principal da interface "
-            "e o script separado, ambos usando HiGHS pelo SciPy. Os demais solvers aparecem como "
-            "referencias tecnicas para comparar abordagem, licenciamento e possibilidade de benchmark futuro.",
+            "Nesta versao, o botao executa tres metodos reais do HiGHS no script separado: "
+            "HiGHS automatico, HiGHS Dual Simplex e HiGHS Interior Point. Todos usam exatamente "
+            "os mesmos parametros escolhidos pelo usuario na interface. Gurobi, lp_solve e "
+            "cuPDLP-C permanecem como referencias tecnicas para benchmark futuro.",
             body,
         ),
         Spacer(1, 0.12 * cm),
+        Paragraph("Tres solvers executados com a consulta da interface", styles["Heading2"]),
+        engine_table,
+        Spacer(1, 0.16 * cm),
         Paragraph("Solvers considerados", styles["Heading2"]),
         catalog_table,
         Spacer(1, 0.16 * cm),

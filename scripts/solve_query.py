@@ -14,6 +14,11 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DATASET = ROOT / "data" / "Crop_recommendation.csv"
 MIN_ASSOCIATION_SUPPORT = 1e-12
 MIN_ASSOCIATION_CONFIDENCE = 1e-12
+SOLVER_ENGINES = [
+    {"id": "highs", "name": "SciPy HiGHS", "method": "highs"},
+    {"id": "highs-ds", "name": "HiGHS Dual Simplex", "method": "highs-ds"},
+    {"id": "highs-ipm", "name": "HiGHS Interior Point", "method": "highs-ipm"},
+]
 
 
 def parse_condition(text: str) -> dict[str, str]:
@@ -266,6 +271,8 @@ def solve_linear_interval(
     data: dict[str, Any],
     target: dict[str, str],
     base: list[dict[str, str]],
+    solver_method: str = "highs",
+    solver_name: str = "SciPy HiGHS",
 ) -> dict[str, Any]:
     rows = data["rows"]
     worlds = data["worlds"]
@@ -314,7 +321,7 @@ def solve_linear_interval(
             A_eq=transformed_a_eq,
             b_eq=transformed_b_eq,
             bounds=transformed_bounds,
-            method="highs",
+            method=solver_method,
         )
 
     lower_result = optimize([*numerator_mask, 0.0])
@@ -333,7 +340,9 @@ def solve_linear_interval(
         "constraints": len(transformed_a_ub) + len(transformed_a_eq),
         "baseConstraints": len(a_ub),
         "constraintSummary": summary,
-        "solver": "scipy.optimize.linprog highs",
+        "solver": f"scipy.optimize.linprog {solver_method}",
+        "solverMethod": solver_method,
+        "solverName": solver_name,
     }
 
 
@@ -450,6 +459,8 @@ def compute_query(
     data: dict[str, Any],
     target: dict[str, str],
     conditions: list[dict[str, str]],
+    solver_method: str = "highs",
+    solver_name: str = "SciPy HiGHS",
 ) -> dict[str, Any]:
     started_at = datetime.now(timezone.utc)
     started_perf = time.perf_counter()
@@ -462,7 +473,7 @@ def compute_query(
     lift = confidence / p_a if confidence is not None and p_a > 0 else None
     count_both = probability_count(rows, both)
     count_base = probability_count(rows, conditions)
-    lp = solve_linear_interval(data, target, conditions)
+    lp = solve_linear_interval(data, target, conditions, solver_method, solver_name)
     finished_at = datetime.now(timezone.utc)
     duration_seconds = time.perf_counter() - started_perf
     return {
@@ -511,6 +522,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Condicao B. Pode repetir. Exemplo: --condition ph=acido",
     )
     parser.add_argument("--output", type=Path, help="Caminho opcional para salvar o JSON.")
+    parser.add_argument(
+        "--solver-method",
+        choices=[engine["method"] for engine in SOLVER_ENGINES],
+        default="highs",
+        help="Metodo do SciPy/HiGHS: highs, highs-ds ou highs-ipm.",
+    )
     parser.add_argument("--show-domains", action="store_true", help="Mostra atributos e valores validos.")
     return parser
 
@@ -545,7 +562,11 @@ def main() -> int:
     try:
         target = validate_conditions([args.target], data["domains"])[0]
         conditions = validate_conditions(args.condition, data["domains"])
-        result = compute_query(data, target, conditions)
+        solver_name = next(
+            (engine["name"] for engine in SOLVER_ENGINES if engine["method"] == args.solver_method),
+            args.solver_method,
+        )
+        result = compute_query(data, target, conditions, args.solver_method, solver_name)
     except ValueError as error:
         print(f"Erro: {error}")
         print("Use --show-domains para ver atributos e valores validos.")

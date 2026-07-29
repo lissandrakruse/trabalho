@@ -91,8 +91,8 @@
           <div class="solver-note">
             O solver usado &eacute; o <strong>HiGHS</strong>, executado por <strong>scipy.optimize.linprog</strong>.
             Ele resolve o programa linear depois da transforma&ccedil;&atilde;o de Charnes-Cooper.
-            Este bot&atilde;o chama o m&oacute;dulo separado <strong>scripts/solve_query.py</strong> e compara sua sa&iacute;da com o c&aacute;lculo principal da interface.
-            Solvers como Gurobi, lp_solve e cuPDLP-C aparecem como refer&ecirc;ncias de compara&ccedil;&atilde;o t&eacute;cnica, mas n&atilde;o s&atilde;o executados automaticamente nesta vers&atilde;o.
+            Este bot&atilde;o chama o m&oacute;dulo separado <strong>scripts/solve_query.py</strong>, executa <strong>HiGHS</strong>, <strong>HiGHS Dual Simplex</strong> e <strong>HiGHS Interior Point</strong> com os mesmos par&acirc;metros da interface, e compara as m&eacute;tricas com o c&aacute;lculo principal.
+            Gurobi, lp_solve e cuPDLP-C ficam como refer&ecirc;ncias de compara&ccedil;&atilde;o t&eacute;cnica.
           </div>
           <div class="solver-demo" id="solverDemo">
             <h3>Demonstra&ccedil;&atilde;o do solver</h3>

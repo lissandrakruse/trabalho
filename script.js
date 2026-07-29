@@ -176,6 +176,24 @@ function renderSolverComparison(result) {
   const catalogRows = solverCatalog.map((solver) => {
     return `<tr><td>${escapeHtml(solver.name)}</td><td>${escapeHtml(solver.status)}</td><td>${escapeHtml(solver.comparison)}</td></tr>`;
   });
+  const engineRows = (result.solverEngineResults || []).map((engine) => {
+    const interval = engine.status === "ok"
+      ? `${fmtCompare(engine.lower)} - ${fmtCompare(engine.upper)}`
+      : escapeHtml(engine.error || "Erro");
+    return [
+      `<tr>`,
+      `<td>${escapeHtml(engine.name)}</td>`,
+      `<td>${fmtCompare(engine.support)}</td>`,
+      `<td>${fmtCompare(engine.confidence)}</td>`,
+      `<td>${fmtCompare(engine.lift)}</td>`,
+      `<td>${interval}</td>`,
+      `<td>${fmtCompare(engine.variables)}</td>`,
+      `<td>${fmtCompare(engine.constraints)}</td>`,
+      `<td>${fmtCompare(engine.durationSeconds)}</td>`,
+      `<td>${engine.allMatch ? "Igual" : "Diferente"}</td>`,
+      `</tr>`,
+    ].join("");
+  });
 
   solverCompareStatus.textContent = result.comparison.allMatch ? "Resultados iguais" : "Diferencas encontradas";
   solverDemo.innerHTML = [
@@ -187,12 +205,15 @@ function renderSolverComparison(result) {
     `<div><span>Modelo</span><strong>${fmtCompare(linear.variables)}</strong><small>variaveis x_w</small></div>`,
     `<div><span>Restricoes</span><strong>${fmtCompare(linear.constraints)}</strong><small>marginais, conjunta e normalizacao</small></div>`,
     `</div>`,
-    `<p>Resultado do solver separado: <strong>${intervalTextValue}</strong>. O painel abaixo compara esse resultado com o calculo principal do projeto.</p>`,
-    `<p><strong>Outros solvers considerados:</strong> Gurobi, lp_solve e cuPDLP-C ficam documentados como comparacao tecnica, mas nao sao executados automaticamente nesta versao.</p>`,
+    `<p>Resultado do solver separado padrao: <strong>${intervalTextValue}</strong>. O painel abaixo compara esse resultado com o calculo principal do projeto e com os 3 metodos executados.</p>`,
+    `<p><strong>Solvers executados:</strong> SciPy HiGHS, HiGHS Dual Simplex e HiGHS Interior Point. Gurobi, lp_solve e cuPDLP-C ficam documentados como comparacao tecnica.</p>`,
     `<p><strong>Tempo de execucao:</strong> ${escapeHtml(timing.message || "Tempo de execucao indisponivel para comparacao.")}</p>`,
   ].join("");
   solverComparison.innerHTML = [
     `<p>${escapeHtml(result.message)}</p>`,
+    engineRows.length
+      ? `<h3>3 solvers executados com os parametros da interface</h3><table><thead><tr><th>Solver</th><th>Suporte</th><th>Confianca</th><th>Lift</th><th>Intervalo</th><th>Variaveis</th><th>Restricoes</th><th>Tempo (s)</th><th>Status</th></tr></thead><tbody>${engineRows.join("")}</tbody></table>`
+      : "",
     catalogRows.length
       ? `<h3>Solvers considerados</h3><table><thead><tr><th>Solver</th><th>Status</th><th>Comparacao</th></tr></thead><tbody>${catalogRows.join("")}</tbody></table>`
       : "",

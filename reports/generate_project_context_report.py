@@ -226,9 +226,9 @@ def build_report() -> None:
     story.append(
         Paragraph(
             "Tambem foi criado um solver separado em scripts/solve_query.py. Ele nao usa a interface "
-            "e serve para reproduzir a mesma consulta com os mesmos dados. Assim, a comparacao "
-            "executavel atual e: projeto principal Flask/app.py contra script separado scripts/solve_query.py, "
-            "ambos usando SciPy HiGHS.",
+            "e serve para reproduzir a mesma consulta com os mesmos dados. O botao de comparacao "
+            "executa tres metodos do HiGHS com os parametros escolhidos pelo usuario: HiGHS automatico, "
+            "HiGHS Dual Simplex e HiGHS Interior Point.",
             body,
         )
     )
@@ -237,8 +237,8 @@ def build_report() -> None:
             [
                 ["Solver", "Status no projeto", "Comparacao"],
                 ["SciPy HiGHS", "Executado no projeto e no script separado.", "Comparacao numerica ativa."],
-                ["HiGHS Dual Simplex", "Referencia tecnica do HiGHS.", "Nao executado como engine separada nesta versao."],
-                ["HiGHS Interior Point", "Referencia tecnica do HiGHS.", "Nao executado como engine separada nesta versao."],
+                ["HiGHS Dual Simplex", "Executado no script separado.", "Comparacao de metricas com a mesma consulta."],
+                ["HiGHS Interior Point", "Executado no script separado.", "Comparacao de metricas com a mesma consulta."],
                 ["Gurobi", "Comparacao documental.", "Nao executado no Render por instalacao/licenca."],
                 ["lp_solve", "Comparacao documental.", "Nao executado no Render nesta versao."],
                 ["cuPDLP-C", "Comparacao documental.", "Nao executado no Render nesta versao."],

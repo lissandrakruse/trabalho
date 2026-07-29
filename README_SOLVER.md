@@ -48,6 +48,14 @@ Para usar outro CSV:
 python scripts/solve_query.py --dataset data/Crop_recommendation.csv --target label=rice --condition ph=acido
 ```
 
+Para escolher manualmente um dos tres metodos HiGHS:
+
+```bash
+python scripts/solve_query.py --target label=rice --condition ph=acido --condition rainfall=alto --solver-method highs
+python scripts/solve_query.py --target label=rice --condition ph=acido --condition rainfall=alto --solver-method highs-ds
+python scripts/solve_query.py --target label=rice --condition ph=acido --condition rainfall=alto --solver-method highs-ipm
+```
+
 O script retorna:
 
 - probabilidades `P(A)`, `P(B)` e `P(A e B)`
@@ -195,7 +203,7 @@ limite inferior <= P(A | B) <= limite superior
 
 9. Solver usado
 
-O solver usado e o HiGHS, chamado pela funcao:
+O solver padrao usado e o HiGHS, chamado pela funcao:
 
 ```text
 scipy.optimize.linprog(method="highs")
@@ -206,6 +214,14 @@ Ele resolve dois problemas lineares para cada consulta:
 - minimizacao de `P(A | B)`;
 - maximizacao de `P(A | B)`.
 
+No botao de comparacao, o projeto executa tres metodos do HiGHS:
+
+```text
+scipy.optimize.linprog(method="highs")
+scipy.optimize.linprog(method="highs-ds")
+scipy.optimize.linprog(method="highs-ipm")
+```
+
 ## Solvers considerados e comparacao
 
 Nesta versao, a comparacao executavel do projeto e:
@@ -214,8 +230,15 @@ Nesta versao, a comparacao executavel do projeto e:
 Projeto principal Flask/app.py  x  Script separado scripts/solve_query.py
 ```
 
-Os dois usam o mesmo dataset, a mesma categorizacao, a mesma formulacao linear e
-o mesmo solver HiGHS via SciPy. A comparacao verifica se os resultados batem em:
+O botao envia para o script separado exatamente os mesmos parametros que o
+usuario escolheu na interface. O script entao resolve a mesma formulacao linear
+com tres metodos:
+
+- SciPy HiGHS;
+- HiGHS Dual Simplex;
+- HiGHS Interior Point.
+
+A comparacao verifica se os resultados batem em:
 
 - `P(A)`;
 - `P(B)`;
@@ -233,16 +256,16 @@ Tabela dos solvers citados no projeto:
 | Solver | Status no projeto | Comparacao |
 | --- | --- | --- |
 | SciPy HiGHS | Executado no projeto principal e no script separado | Comparacao numerica ativa entre API Flask e `scripts/solve_query.py` |
-| HiGHS Dual Simplex | Referencia tecnica do HiGHS | Nao executado como engine separada nesta versao |
-| HiGHS Interior Point | Referencia tecnica do HiGHS | Nao executado como engine separada nesta versao |
+| HiGHS Dual Simplex | Executado no script separado | Comparacao de metricas com a mesma consulta da interface |
+| HiGHS Interior Point | Executado no script separado | Comparacao de metricas com a mesma consulta da interface |
 | Gurobi | Comparacao documental | Nao executado no Render por depender de instalacao/licenca |
 | lp_solve | Comparacao documental | Nao executado no Render nesta versao |
 | cuPDLP-C | Comparacao documental | Nao executado no Render nesta versao |
 
 Assim, quando o relatorio fala em "solver separado", ele esta falando do script
-Python independente que reproduz a resolucao com HiGHS. Quando cita Gurobi,
-lp_solve ou cuPDLP-C, o projeto esta registrando solvers alternativos que podem
-ser usados em uma etapa futura de benchmark.
+Python independente que reproduz a resolucao com os tres metodos HiGHS. Quando
+cita Gurobi, lp_solve ou cuPDLP-C, o projeto esta registrando solvers
+alternativos que podem ser usados em uma etapa futura de benchmark.
 
 10. Comparacao independente
 
