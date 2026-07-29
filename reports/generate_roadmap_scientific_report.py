@@ -317,6 +317,21 @@ def build_report() -> None:
             body,
         )
     )
+    story.append(
+        styled_table(
+            [
+                ["Solver", "Papel no projeto", "Situacao da comparacao"],
+                ["SciPy HiGHS", "Solver usado pela interface e pelo script separado.", "Executado e comparado numericamente."],
+                ["HiGHS Dual Simplex", "Referencia tecnica dentro da familia HiGHS.", "Documentado para benchmark futuro."],
+                ["HiGHS Interior Point", "Referencia tecnica dentro da familia HiGHS.", "Documentado para benchmark futuro."],
+                ["Gurobi", "Solver comercial de referencia para LP/MILP.", "Nao executado por licenca/deploy."],
+                ["lp_solve", "Solver livre tradicional para LP/MILP.", "Nao executado nesta versao."],
+                ["cuPDLP-C", "Solver moderno para LP em larga escala.", "Nao executado nesta versao."],
+            ],
+            [3.8 * cm, 5.8 * cm, 6.0 * cm],
+            header_color=INK,
+        )
+    )
 
     add_heading(story, "7. Saidas geradas", h2)
     outputs = styled_table(

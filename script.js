@@ -172,6 +172,10 @@ function renderSolverComparison(result) {
     }
     return `<tr><td>${labels[key] || key}</td><td>${fmtCompare(item.main)}</td><td>${fmtCompare(item.solver)}</td><td>${difference}</td><td>${status}</td></tr>`;
   });
+  const solverCatalog = result.solverCatalog || [];
+  const catalogRows = solverCatalog.map((solver) => {
+    return `<tr><td>${escapeHtml(solver.name)}</td><td>${escapeHtml(solver.status)}</td><td>${escapeHtml(solver.comparison)}</td></tr>`;
+  });
 
   solverCompareStatus.textContent = result.comparison.allMatch ? "Resultados iguais" : "Diferencas encontradas";
   solverDemo.innerHTML = [
@@ -184,10 +188,15 @@ function renderSolverComparison(result) {
     `<div><span>Restricoes</span><strong>${fmtCompare(linear.constraints)}</strong><small>marginais, conjunta e normalizacao</small></div>`,
     `</div>`,
     `<p>Resultado do solver separado: <strong>${intervalTextValue}</strong>. O painel abaixo compara esse resultado com o calculo principal do projeto.</p>`,
+    `<p><strong>Outros solvers considerados:</strong> Gurobi, lp_solve e cuPDLP-C ficam documentados como comparacao tecnica, mas nao sao executados automaticamente nesta versao.</p>`,
     `<p><strong>Tempo de execucao:</strong> ${escapeHtml(timing.message || "Tempo de execucao indisponivel para comparacao.")}</p>`,
   ].join("");
   solverComparison.innerHTML = [
     `<p>${escapeHtml(result.message)}</p>`,
+    catalogRows.length
+      ? `<h3>Solvers considerados</h3><table><thead><tr><th>Solver</th><th>Status</th><th>Comparacao</th></tr></thead><tbody>${catalogRows.join("")}</tbody></table>`
+      : "",
+    `<h3>Comparacao numerica executada</h3>`,
     `<table><thead><tr><th>Metrica</th><th>Projeto</th><th>Solver separado</th><th>Diferenca</th><th>Status</th></tr></thead><tbody>`,
     rows.join(""),
     `</tbody></table>`,

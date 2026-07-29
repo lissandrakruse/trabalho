@@ -904,6 +904,53 @@ def compare_solver_timing(main_result: dict[str, Any], solver_result: dict[str, 
     }
 
 
+def solver_catalog() -> list[dict[str, str]]:
+    return [
+        {
+            "name": "SciPy HiGHS",
+            "engine": "scipy.optimize.linprog(method='highs')",
+            "status": "Executado no projeto principal e no script separado",
+            "comparison": "Comparacao numerica ativa: API Flask x scripts/solve_query.py",
+            "notes": "Solver aberto, compativel com Render e adequado para LP apos Charnes-Cooper.",
+        },
+        {
+            "name": "HiGHS Dual Simplex",
+            "engine": "SciPy/HiGHS com estrategia simplex dual",
+            "status": "Referencia tecnica do HiGHS",
+            "comparison": "Nao executado como engine separada nesta versao",
+            "notes": "Opcao classica para LP; pode ser ativada futuramente com configuracao especifica do solver.",
+        },
+        {
+            "name": "HiGHS Interior Point",
+            "engine": "SciPy/HiGHS com metodo de pontos interiores",
+            "status": "Referencia tecnica do HiGHS",
+            "comparison": "Nao executado como engine separada nesta versao",
+            "notes": "Boa alternativa para comparar tempo em problemas maiores.",
+        },
+        {
+            "name": "Gurobi",
+            "engine": "gurobipy",
+            "status": "Comparacao documental",
+            "comparison": "Nao executado no Render por depender de instalacao/licenca",
+            "notes": "Solver comercial muito forte para LP/MILP; citado como referencia de benchmark futuro.",
+        },
+        {
+            "name": "lp_solve",
+            "engine": "lp_solve",
+            "status": "Comparacao documental",
+            "comparison": "Nao executado no Render nesta versao",
+            "notes": "Solver livre tradicional para LP/MILP; util como comparacao externa futura.",
+        },
+        {
+            "name": "cuPDLP-C",
+            "engine": "COPT-Public/cuPDLP-C",
+            "status": "Comparacao documental",
+            "comparison": "Nao executado no Render nesta versao",
+            "notes": "Referencia moderna para LP em larga escala, especialmente em cenarios de alto desempenho.",
+        },
+    ]
+
+
 def build_solver_comparison(payload: dict[str, Any]) -> dict[str, Any]:
     main_result = compute_query(payload)
 
@@ -920,6 +967,7 @@ def build_solver_comparison(payload: dict[str, Any]) -> dict[str, Any]:
         "standaloneSolver": solver_result,
         "comparison": compare_solver_result(main_result, solver_result),
         "timing": compare_solver_timing(main_result, solver_result),
+        "solverCatalog": solver_catalog(),
         "message": "Os mesmos dados da consulta foram resolvidos pelo solver separado scripts/solve_query.py e comparados com o projeto.",
     }
 
@@ -1206,6 +1254,25 @@ def write_solver_comparison_report(result: dict[str, Any]) -> None:
         )
     )
 
+    catalog_rows = [["Solver", "Status no projeto", "Comparacao"]]
+    for solver in result.get("solverCatalog", solver_catalog()):
+        catalog_rows.append([solver["name"], solver["status"], solver["comparison"]])
+    catalog_table = Table(catalog_rows, colWidths=[3.9 * cm, 5.8 * cm, 6.0 * cm])
+    catalog_table.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#111827")),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#e5e7eb")),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("FONTSIZE", (0, 0), (-1, -1), 7.7),
+                ("LEADING", (0, 0), (-1, -1), 9.4),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f7faf9")]),
+            ]
+        )
+    )
+
     main_result = result["main"]
     target = event_key([main_result["target"]])
     conditions = event_key(main_result["conditions"])
@@ -1236,7 +1303,17 @@ def write_solver_comparison_report(result: dict[str, Any]) -> None:
             "que converte a razao P(A e B) / P(B) em objetivos lineares de minimizacao e maximizacao.",
             body,
         ),
+        Paragraph(
+            "Nesta versao, a comparacao executavel e feita entre o calculo principal da interface "
+            "e o script separado, ambos usando HiGHS pelo SciPy. Os demais solvers aparecem como "
+            "referencias tecnicas para comparar abordagem, licenciamento e possibilidade de benchmark futuro.",
+            body,
+        ),
+        Spacer(1, 0.12 * cm),
+        Paragraph("Solvers considerados", styles["Heading2"]),
+        catalog_table,
         Spacer(1, 0.16 * cm),
+        Paragraph("Comparacao numerica executada", styles["Heading2"]),
         table,
         Spacer(1, 0.18 * cm),
         Paragraph("Conclusao da comparacao", styles["Heading2"]),

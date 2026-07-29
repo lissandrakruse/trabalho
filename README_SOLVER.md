@@ -206,6 +206,44 @@ Ele resolve dois problemas lineares para cada consulta:
 - minimizacao de `P(A | B)`;
 - maximizacao de `P(A | B)`.
 
+## Solvers considerados e comparacao
+
+Nesta versao, a comparacao executavel do projeto e:
+
+```text
+Projeto principal Flask/app.py  x  Script separado scripts/solve_query.py
+```
+
+Os dois usam o mesmo dataset, a mesma categorizacao, a mesma formulacao linear e
+o mesmo solver HiGHS via SciPy. A comparacao verifica se os resultados batem em:
+
+- `P(A)`;
+- `P(B)`;
+- `P(A e B)`;
+- confianca;
+- lift;
+- limite inferior do programa linear;
+- limite superior do programa linear;
+- quantidade de variaveis;
+- quantidade de restricoes;
+- tempo de execucao.
+
+Tabela dos solvers citados no projeto:
+
+| Solver | Status no projeto | Comparacao |
+| --- | --- | --- |
+| SciPy HiGHS | Executado no projeto principal e no script separado | Comparacao numerica ativa entre API Flask e `scripts/solve_query.py` |
+| HiGHS Dual Simplex | Referencia tecnica do HiGHS | Nao executado como engine separada nesta versao |
+| HiGHS Interior Point | Referencia tecnica do HiGHS | Nao executado como engine separada nesta versao |
+| Gurobi | Comparacao documental | Nao executado no Render por depender de instalacao/licenca |
+| lp_solve | Comparacao documental | Nao executado no Render nesta versao |
+| cuPDLP-C | Comparacao documental | Nao executado no Render nesta versao |
+
+Assim, quando o relatorio fala em "solver separado", ele esta falando do script
+Python independente que reproduz a resolucao com HiGHS. Quando cita Gurobi,
+lp_solve ou cuPDLP-C, o projeto esta registrando solvers alternativos que podem
+ser usados em uma etapa futura de benchmark.
+
 10. Comparacao independente
 
 O projeto tambem possui um script separado do solver. A interface chama esse

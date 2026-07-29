@@ -223,6 +223,30 @@ def build_report() -> None:
         )
     )
     story.append(Paragraph("scipy.optimize.linprog(method='highs')", code))
+    story.append(
+        Paragraph(
+            "Tambem foi criado um solver separado em scripts/solve_query.py. Ele nao usa a interface "
+            "e serve para reproduzir a mesma consulta com os mesmos dados. Assim, a comparacao "
+            "executavel atual e: projeto principal Flask/app.py contra script separado scripts/solve_query.py, "
+            "ambos usando SciPy HiGHS.",
+            body,
+        )
+    )
+    story.append(
+        styled_table(
+            [
+                ["Solver", "Status no projeto", "Comparacao"],
+                ["SciPy HiGHS", "Executado no projeto e no script separado.", "Comparacao numerica ativa."],
+                ["HiGHS Dual Simplex", "Referencia tecnica do HiGHS.", "Nao executado como engine separada nesta versao."],
+                ["HiGHS Interior Point", "Referencia tecnica do HiGHS.", "Nao executado como engine separada nesta versao."],
+                ["Gurobi", "Comparacao documental.", "Nao executado no Render por instalacao/licenca."],
+                ["lp_solve", "Comparacao documental.", "Nao executado no Render nesta versao."],
+                ["cuPDLP-C", "Comparacao documental.", "Nao executado no Render nesta versao."],
+            ],
+            [3.8 * cm, 5.6 * cm, 6.2 * cm],
+            header_color=INK,
+        )
+    )
 
     heading(story, "8. Saidas do sistema", h2)
     story.append(
