@@ -393,11 +393,13 @@ async function compareSolver() {
   }
 }
 
-async function generateFullLinearProgram() {
+async function generateFullLinearProgram(downloadAfter = false) {
   generateFullLinearProgramButton.disabled = true;
   generateFullLinearProgramButton.textContent = "Gerando LP...";
   downloadFullLinearProgramLink.classList.add("is-disabled");
   downloadFullLinearProgramLink.setAttribute("aria-disabled", "true");
+  const originalDownloadText = downloadFullLinearProgramLink.textContent;
+  if (downloadAfter) downloadFullLinearProgramLink.textContent = "Gerando TXT...";
 
   try {
     const response = await fetch("/api/linear-program/full", {
@@ -407,15 +409,27 @@ async function generateFullLinearProgram() {
     });
     const result = await response.json();
     if (!response.ok || !result.ok) throw new Error(result.error || "Erro ao gerar LP completo.");
-    downloadFullLinearProgramLink.href = `${result.downloadUrl || result.fileUrl}?t=${Date.now()}`;
+    const downloadUrl = `${result.downloadUrl || result.fileUrl}?t=${Date.now()}`;
+    downloadFullLinearProgramLink.href = downloadUrl;
     downloadFullLinearProgramLink.classList.remove("is-disabled");
     downloadFullLinearProgramLink.setAttribute("aria-disabled", "false");
-    linearProgram.textContent = `${linearProgram.textContent}\n\nArquivo TXT completo gerado e pronto para baixar.`;
+    linearProgram.textContent = `${linearProgram.textContent}\n\nArquivo TXT completo gerado${downloadAfter ? " e download iniciado" : " e pronto para baixar"}.`;
+    if (downloadAfter) {
+      const temporaryLink = document.createElement("a");
+      temporaryLink.href = downloadUrl;
+      temporaryLink.download = "programa_linear_completo.txt";
+      document.body.appendChild(temporaryLink);
+      temporaryLink.click();
+      temporaryLink.remove();
+    }
   } catch (error) {
     linearProgram.textContent = `${linearProgram.textContent}\n\nErro ao gerar LP completo: ${error.message}`;
   } finally {
     generateFullLinearProgramButton.disabled = false;
     generateFullLinearProgramButton.textContent = "Gerar LP Completo";
+    downloadFullLinearProgramLink.textContent = originalDownloadText;
+    downloadFullLinearProgramLink.classList.remove("is-disabled");
+    downloadFullLinearProgramLink.setAttribute("aria-disabled", "false");
   }
 }
 
@@ -439,9 +453,9 @@ async function boot() {
   generateSolverReportButton.addEventListener("click", generateSolverReport);
   generateFullLinearProgramButton.addEventListener("click", generateFullLinearProgram);
   downloadFullLinearProgramLink.addEventListener("click", (event) => {
-    if (downloadFullLinearProgramLink.classList.contains("is-disabled")) {
-      event.preventDefault();
-    }
+    event.preventDefault();
+    if (downloadFullLinearProgramLink.classList.contains("is-disabled")) return;
+    generateFullLinearProgram(true);
   });
   tabButtons.forEach((button) => {
     button.addEventListener("click", () => setActiveTab(button));
