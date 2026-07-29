@@ -16,6 +16,7 @@ ROOT = Path(__file__).resolve().parent
 DATASET_PATH = ROOT / "data" / "Crop_recommendation.csv"
 GENERATED_REPORT_DIR = ROOT / "reports" / "generated"
 QUERY_REPORT_PATH = GENERATED_REPORT_DIR / "relatorio_consulta_atual.pdf"
+SOLVER_COMPARISON_REPORT_PATH = GENERATED_REPORT_DIR / "relatorio_comparacao_solver.pdf"
 KNOWN_LABELS = {
     "N": "Nitrogenio",
     "P": "Fosforo",
@@ -521,6 +522,25 @@ def compare_solver_result(main_result: dict[str, Any], solver_result: dict[str, 
     }
 
 
+def build_solver_comparison(payload: dict[str, Any]) -> dict[str, Any]:
+    main_result = compute_query(payload)
+
+    from scripts import solve_query as standalone_solver
+
+    solver_data = standalone_solver.load_dataset(standalone_solver.DEFAULT_DATASET)
+    solver_target = standalone_solver.validate_conditions([main_result["target"]], solver_data["domains"])[0]
+    solver_conditions = standalone_solver.validate_conditions(main_result["conditions"], solver_data["domains"])
+    solver_result = standalone_solver.compute_query(solver_data, solver_target, solver_conditions)
+
+    return {
+        "ok": True,
+        "main": main_result,
+        "standaloneSolver": solver_result,
+        "comparison": compare_solver_result(main_result, solver_result),
+        "message": "Comparacao executada com o solver separado scripts/solve_query.py.",
+    }
+
+
 @app.post("/api/query")
 def query():
     try:
@@ -533,29 +553,13 @@ def query():
 @app.post("/api/solver/compare")
 def solver_compare():
     try:
-        payload = request.get_json(force=True)
-        main_result = compute_query(payload)
-
-        from scripts import solve_query as standalone_solver
-
-        solver_data = standalone_solver.load_dataset(standalone_solver.DEFAULT_DATASET)
-        solver_target = standalone_solver.validate_conditions([main_result["target"]], solver_data["domains"])[0]
-        solver_conditions = standalone_solver.validate_conditions(main_result["conditions"], solver_data["domains"])
-        solver_result = standalone_solver.compute_query(solver_data, solver_target, solver_conditions)
+        result = build_solver_comparison(request.get_json(force=True))
     except ValueError as error:
         return jsonify({"ok": False, "error": str(error)}), 400
     except Exception as error:
         return jsonify({"ok": False, "error": f"Solver separado indisponivel: {error}"}), 500
 
-    return jsonify(
-        {
-            "ok": True,
-            "main": main_result,
-            "standaloneSolver": solver_result,
-            "comparison": compare_solver_result(main_result, solver_result),
-            "message": "Comparacao executada com o solver separado scripts/solve_query.py.",
-        }
-    )
+    return jsonify(result)
 
 
 def format_report_probability(value: float | None) -> str:
@@ -566,6 +570,23 @@ def format_report_number(value: float | None) -> str:
     if value is None:
         return "-"
     return f"{value:.3f}".replace(".", ",")
+
+
+def format_report_metric(value: float | int | None) -> str:
+    if value is None:
+        return "-"
+    number = float(value)
+    if number.is_integer():
+        return str(int(number))
+    return f"{number:.3f}".replace(".", ",")
+
+
+def format_report_difference(value: float | None) -> str:
+    if value is None:
+        return "-"
+    if abs(value) <= 1e-12:
+        return "0"
+    return f"{value:.3e}".replace(".", ",")
 
 
 def write_query_report(result: dict[str, Any]) -> None:
@@ -683,6 +704,123 @@ def write_query_report(result: dict[str, Any]) -> None:
     doc.build(story)
 
 
+def write_solver_comparison_report(result: dict[str, Any]) -> None:
+    try:
+        from reportlab.lib import colors
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+        from reportlab.lib.units import cm
+        from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+    except Exception as error:
+        raise RuntimeError(f"ReportLab indisponivel para gerar PDF: {error}") from error
+
+    GENERATED_REPORT_DIR.mkdir(parents=True, exist_ok=True)
+    styles = getSampleStyleSheet()
+    title = ParagraphStyle(
+        "TitleCustom",
+        parent=styles["Title"],
+        fontName="Helvetica-Bold",
+        fontSize=18,
+        leading=22,
+        alignment=1,
+        textColor=colors.HexColor("#111827"),
+    )
+    body = ParagraphStyle(
+        "BodyCustom",
+        parent=styles["BodyText"],
+        fontSize=10,
+        leading=14,
+        spaceAfter=6,
+    )
+
+    labels = {
+        "pA": "P(A)",
+        "pB": "P(B)",
+        "support": "P(A e B)",
+        "confidence": "Confianca P(A | B)",
+        "lift": "Lift",
+        "countBoth": "Casos A e B",
+        "countBase": "Casos B",
+        "linearLower": "Limite linear inferior",
+        "linearUpper": "Limite linear superior",
+        "variables": "Variaveis",
+        "constraints": "Restricoes",
+    }
+    comparison = result["comparison"]
+    rows = [["Metrica", "Projeto", "Solver separado", "Diferenca", "Status"]]
+    for key, item in comparison["metrics"].items():
+        rows.append(
+            [
+                labels.get(key, key),
+                format_report_metric(item["main"]),
+                format_report_metric(item["solver"]),
+                format_report_difference(item["difference"]),
+                "Igual" if item["match"] else "Diferente",
+            ]
+        )
+
+    table = Table(rows, colWidths=[4.2 * cm, 2.8 * cm, 3.2 * cm, 2.7 * cm, 2.7 * cm])
+    table.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0f766e")),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#e5e7eb")),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("FONTSIZE", (0, 0), (-1, -1), 8),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f7faf9")]),
+            ]
+        )
+    )
+
+    main_result = result["main"]
+    target = event_key([main_result["target"]])
+    conditions = event_key(main_result["conditions"])
+    status = (
+        "Todos os valores comparados coincidem entre o projeto e o solver separado."
+        if comparison["allMatch"]
+        else "Foram encontradas diferencas entre o projeto e o solver separado."
+    )
+    story = [
+        Paragraph("Relatorio Comparativo: Projeto x Solver Separado", title),
+        Spacer(1, 0.2 * cm),
+        Paragraph(f"Consulta comparada: P({target} | {conditions})", body),
+        Paragraph(
+            "O projeto principal calcula as probabilidades pela API Flask da interface. "
+            "O solver separado executa o modulo scripts/solve_query.py, usando o mesmo dataset, "
+            "a mesma categorizacao e o solver HiGHS via scipy.optimize.linprog.",
+            body,
+        ),
+        Paragraph(
+            "A programacao linear e resolvida apos a transformacao de Charnes-Cooper, "
+            "que converte a razao P(A e B) / P(B) em objetivos lineares de minimizacao e maximizacao.",
+            body,
+        ),
+        Spacer(1, 0.16 * cm),
+        table,
+        Spacer(1, 0.18 * cm),
+        Paragraph("Conclusao da comparacao", styles["Heading2"]),
+        Paragraph(status, body),
+        Paragraph(
+            "Essa comparacao evidencia que a interface nao apenas exibe resultados: ela esta alinhada "
+            "ao solver independente usado para reproduzir a formulacao matematica da consulta.",
+            body,
+        ),
+    ]
+
+    doc = SimpleDocTemplate(
+        str(SOLVER_COMPARISON_REPORT_PATH),
+        pagesize=A4,
+        rightMargin=1.7 * cm,
+        leftMargin=1.7 * cm,
+        topMargin=1.5 * cm,
+        bottomMargin=1.4 * cm,
+        title="Relatorio Comparativo do Solver",
+    )
+    doc.build(story)
+
+
 @app.post("/api/report/query")
 def query_report():
     try:
@@ -697,6 +835,26 @@ def query_report():
             "ok": True,
             "reportUrl": "/reports/generated/relatorio_consulta_atual.pdf",
             "message": "Relatorio gerado com sucesso.",
+        }
+    )
+
+
+@app.post("/api/report/solver-comparison")
+def solver_comparison_report():
+    try:
+        result = build_solver_comparison(request.get_json(force=True))
+        write_solver_comparison_report(result)
+    except ValueError as error:
+        return jsonify({"ok": False, "error": str(error)}), 400
+    except RuntimeError as error:
+        return jsonify({"ok": False, "error": str(error)}), 500
+    except Exception as error:
+        return jsonify({"ok": False, "error": f"Erro ao comparar solver: {error}"}), 500
+    return jsonify(
+        {
+            "ok": True,
+            "reportUrl": "/reports/generated/relatorio_comparacao_solver.pdf",
+            "message": "Relatorio comparativo gerado com sucesso.",
         }
     )
 

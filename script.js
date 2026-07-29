@@ -6,7 +6,9 @@ const targetAttribute = document.querySelector("#targetAttribute");
 const targetValue = document.querySelector("#targetValue");
 const generateReportButton = document.querySelector("#generateReport");
 const compareSolverButton = document.querySelector("#compareSolver");
+const generateSolverReportButton = document.querySelector("#generateSolverReport");
 const downloadReportLink = document.querySelector("#downloadReport");
+const downloadSolverReportLink = document.querySelector("#downloadSolverReport");
 const supportValue = document.querySelector("#supportValue");
 const confidenceValue = document.querySelector("#confidenceValue");
 const liftValue = document.querySelector("#liftValue");
@@ -257,6 +259,32 @@ async function generateReport() {
   }
 }
 
+async function generateSolverReport() {
+  generateSolverReportButton.disabled = true;
+  generateSolverReportButton.textContent = "Gerando comparativo...";
+  downloadSolverReportLink.classList.add("is-hidden");
+
+  try {
+    const response = await fetch("/api/report/solver-comparison", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(buildPayload()),
+    });
+    const result = await response.json();
+    if (!response.ok || !result.ok) throw new Error(result.error || "Erro ao gerar comparativo.");
+    const reportUrl = `${result.reportUrl}?t=${Date.now()}`;
+    downloadSolverReportLink.href = reportUrl;
+    downloadSolverReportLink.classList.remove("is-hidden");
+    window.open(reportUrl, "_blank", "noopener");
+  } catch (error) {
+    solverCompareStatus.textContent = "Erro no relatorio";
+    solverComparison.innerHTML = `<p><strong>Relatorio comparativo:</strong> ${escapeHtml(error.message)}</p>`;
+  } finally {
+    generateSolverReportButton.disabled = false;
+    generateSolverReportButton.textContent = "Gerar Relatorio Comparativo";
+  }
+}
+
 async function compareSolver() {
   compareSolverButton.disabled = true;
   compareSolverButton.textContent = "Resolvendo...";
@@ -298,6 +326,7 @@ async function boot() {
   runQueryButton.addEventListener("click", runQuery);
   generateReportButton.addEventListener("click", generateReport);
   compareSolverButton.addEventListener("click", compareSolver);
+  generateSolverReportButton.addEventListener("click", generateSolverReport);
   tabButtons.forEach((button) => {
     button.addEventListener("click", () => setActiveTab(button));
   });
