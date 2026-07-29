@@ -28,6 +28,13 @@ from app import (  # noqa: E402
     solve_linear_interval,
 )
 
+INK = colors.HexColor("#111827")
+MUTED = colors.HexColor("#374151")
+GRID = colors.HexColor("#e5e7eb")
+TEAL = colors.HexColor("#0f766e")
+TEAL_DARK = colors.HexColor("#176b5b")
+SOFT = colors.HexColor("#f7faf9")
+
 
 def fmt(value: float | None) -> str:
     if value is None:
@@ -36,9 +43,46 @@ def fmt(value: float | None) -> str:
 
 
 def add_heading(story: list, text: str, style: ParagraphStyle) -> None:
-    story.append(Spacer(1, 0.18 * cm))
+    story.append(Spacer(1, 0.22 * cm))
     story.append(Paragraph(text, style))
     story.append(Spacer(1, 0.08 * cm))
+
+
+def styled_table(rows: list[list[str]], col_widths: list[float], header_color=TEAL_DARK) -> Table:
+    table = Table(rows, colWidths=col_widths, repeatRows=1)
+    table.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, 0), header_color),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                ("GRID", (0, 0), (-1, -1), 0.4, GRID),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
+                ("FONTSIZE", (0, 0), (-1, -1), 8.7),
+                ("LEADING", (0, 0), (-1, -1), 11),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, SOFT]),
+                ("LEFTPADDING", (0, 0), (-1, -1), 7),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 7),
+                ("TOPPADDING", (0, 0), (-1, -1), 6),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+            ]
+        )
+    )
+    return table
+
+
+def page_style(canvas, doc) -> None:
+    canvas.saveState()
+    width, height = A4
+    canvas.setStrokeColor(GRID)
+    canvas.setLineWidth(0.7)
+    canvas.line(doc.leftMargin, height - 1.05 * cm, width - doc.rightMargin, height - 1.05 * cm)
+    canvas.setFont("Helvetica", 8)
+    canvas.setFillColor(MUTED)
+    canvas.drawString(doc.leftMargin, 0.75 * cm, "Trabalho - Probabilidades e Programacao Linear")
+    canvas.drawRightString(width - doc.rightMargin, 0.75 * cm, f"Pagina {doc.page}")
+    canvas.restoreState()
 
 
 def build_report() -> None:
@@ -64,10 +108,21 @@ def build_report() -> None:
         "TitleCustom",
         parent=styles["Title"],
         fontName="Helvetica-Bold",
-        fontSize=20,
-        leading=24,
-        textColor=colors.HexColor("#17352f"),
-        spaceAfter=10,
+        fontSize=19,
+        leading=23,
+        alignment=1,
+        textColor=INK,
+        spaceAfter=5,
+    )
+    subtitle = ParagraphStyle(
+        "SubtitleCustom",
+        parent=styles["BodyText"],
+        fontName="Helvetica",
+        fontSize=10,
+        leading=14,
+        alignment=1,
+        textColor=MUTED,
+        spaceAfter=12,
     )
     h2 = ParagraphStyle(
         "HeadingCustom",
@@ -75,7 +130,9 @@ def build_report() -> None:
         fontName="Helvetica-Bold",
         fontSize=13,
         leading=16,
-        textColor=colors.HexColor("#176b5b"),
+        textColor=TEAL,
+        spaceBefore=4,
+        spaceAfter=4,
     )
     body = ParagraphStyle(
         "BodyCustom",
@@ -91,17 +148,18 @@ def build_report() -> None:
         fontName="Courier",
         fontSize=8,
         leading=10,
-        backColor=colors.HexColor("#f2f5f4"),
+        textColor=INK,
+        backColor=colors.HexColor("#f3f4f6"),
         borderPadding=6,
     )
 
     doc = SimpleDocTemplate(
         str(OUTPUT),
         pagesize=A4,
-        rightMargin=1.6 * cm,
-        leftMargin=1.6 * cm,
-        topMargin=1.4 * cm,
-        bottomMargin=1.4 * cm,
+        rightMargin=1.8 * cm,
+        leftMargin=1.8 * cm,
+        topMargin=1.55 * cm,
+        bottomMargin=1.35 * cm,
         title="Relatorio - Saida e Programacao Linear",
     )
 
@@ -111,7 +169,7 @@ def build_report() -> None:
         Paragraph(
             "Consulta probabilistica com dataset categorico, regras de associacao "
             "e resolucao por programacao linear.",
-            body,
+            subtitle,
         )
     )
 
@@ -137,7 +195,7 @@ def build_report() -> None:
         )
     )
 
-    metadata_table = Table(
+    metadata_table = styled_table(
         [
             ["Item", "Valor"],
             ["Atributos", ", ".join(data["attributes"])],
@@ -145,19 +203,7 @@ def build_report() -> None:
             ["Categoricos originais", ", ".join(data["categoricalAttributes"]) or "-"],
             ["Mundos observados", str(len(data["worlds"]))],
         ],
-        colWidths=[5 * cm, 11 * cm],
-    )
-    metadata_table.setStyle(
-        TableStyle(
-            [
-                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#176b5b")),
-                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-                ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#b9c7c3")),
-                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f7faf9")]),
-            ]
-        )
+        [5 * cm, 10.6 * cm],
     )
     story.append(metadata_table)
 
@@ -173,7 +219,7 @@ def build_report() -> None:
     story.append(Paragraph("Consulta: P(label=rice | ph=acido, rainfall=alto)", body))
 
     add_heading(story, "4. Saida probabilistica", h2)
-    metrics_table = Table(
+    metrics_table = styled_table(
         [
             ["Metrica", "Valor", "Interpretacao"],
             ["P(A)", fmt(p_a), "Probabilidade marginal da cultura rice."],
@@ -187,23 +233,39 @@ def build_report() -> None:
                 "Casos que satisfazem A e B sobre casos que satisfazem B.",
             ],
         ],
-        colWidths=[4.2 * cm, 3 * cm, 8.8 * cm],
-    )
-    metrics_table.setStyle(
-        TableStyle(
-            [
-                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#17352f")),
-                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-                ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#b9c7c3")),
-                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f7faf9")]),
-            ]
-        )
+        [4.1 * cm, 2.7 * cm, 8.8 * cm],
+        header_color=INK,
     )
     story.append(metrics_table)
 
-    add_heading(story, "5. Programacao linear", h2)
+    add_heading(story, "5. Probabilidades lineares consideradas", h2)
+    story.append(
+        Paragraph(
+            "No modelo atual entram automaticamente as probabilidades lineares mais "
+            "importantes para responder a consulta escolhida. Elas sao somas de "
+            "variaveis x_w, portanto podem ser escritas diretamente como restricoes "
+            "lineares.",
+            body,
+        )
+    )
+    linear_table = styled_table(
+        [
+            ["Tipo", "Forma", "Status no sistema"],
+            ["Marginal", "P(valor de atributo)", "Incluida para todos os valores de todos os atributos."],
+            ["Evento A", "P(A)", "Incluida conforme a pergunta do usuario."],
+            ["Condicoes B", "P(B)", "Incluida conforme as afirmacoes do usuario."],
+            ["Conjunta da regra", "P(A e B)", "Incluida para calcular suporte e condicional."],
+            ["Suporte", "P(A e B)", "Linear direto."],
+            ["Condicional", "P(A | B)", "Resolvida por transformacao linear-fracionaria."],
+            ["Conjuntas de pares", "P(X=x, Y=y)", "Possivel extensao; nao entra por padrao para evitar explosao combinatoria."],
+            ["Conjuntas de trios ou mais", "P(X=x, Y=y, Z=z)", "Possivel extensao; aumenta muito variaveis/restricoes."],
+        ],
+        [4.2 * cm, 4.8 * cm, 6.6 * cm],
+        header_color=TEAL,
+    )
+    story.append(linear_table)
+
+    add_heading(story, "6. Programacao linear", h2)
     story.append(
         Paragraph(
             "Cada mundo possivel w recebe uma variavel x_w, que representa a "
@@ -216,7 +278,7 @@ def build_report() -> None:
     )
     story.append(Paragraph(lp_text.replace("\n", "<br/>"), code))
 
-    add_heading(story, "6. Saida final apresentada ao usuario", h2)
+    add_heading(story, "7. Saida final apresentada ao usuario", h2)
     if lp.get("ok"):
         interval_text = f"{fmt(lp['lower'])} <= P(A | B) <= {fmt(lp['upper'])}"
     else:
@@ -237,7 +299,7 @@ def build_report() -> None:
         )
     )
 
-    add_heading(story, "7. Relacao com o enunciado", h2)
+    add_heading(story, "8. Relacao com o enunciado", h2)
     story.append(
         Paragraph(
             "A saida comprova que o sistema extrai conhecimento probabilistico "
@@ -248,7 +310,7 @@ def build_report() -> None:
         )
     )
 
-    doc.build(story)
+    doc.build(story, onFirstPage=page_style, onLaterPages=page_style)
 
 
 if __name__ == "__main__":
