@@ -444,6 +444,36 @@ def build_linear_constraints(
             }
         )
 
+    def add_learned_confidence_rule(rule: dict[str, Any]) -> None:
+        antecedent = rule["antecedent"]
+        consequent = rule["consequent"]
+        both = [*antecedent, *consequent]
+        confidence = rule["confidence"]
+        lower, upper = rounded_interval(confidence)
+        antecedent_mask = world_mask(worlds, antecedent)
+        both_mask = world_mask(worlds, both)
+        a_ub.append(add_vectors(both_mask, antecedent_mask, -upper))
+        b_ub.append(0.0)
+        a_ub.append(add_vectors([-item for item in both_mask], antecedent_mask, lower))
+        b_ub.append(0.0)
+        records.append(
+            {
+                "kind": "learned_association_rule",
+                "antecedent": antecedent,
+                "consequent": consequent,
+                "lower": lower,
+                "upper": upper,
+                "value": confidence,
+                "support": rule["support"],
+                "lift": rule["lift"],
+                "source": "resultado do algoritmo de aprendizagem de regras",
+                "expression": (
+                    f"{lower:.3f} <= {mask_expression(both)} / "
+                    f"{mask_expression(antecedent)} <= {upper:.3f}"
+                ),
+            }
+        )
+
     for attribute in attributes:
         for value in domains[attribute]:
             conditions = [{"attribute": attribute, "value": value}]
@@ -461,11 +491,7 @@ def build_linear_constraints(
 
     learned_rules = mine_association_rules(rows, domains)
     for rule in learned_rules:
-        add_confidence_rule(
-            "learned_association_rule",
-            rule["antecedent"],
-            rule["consequent"],
-        )
+        add_learned_confidence_rule(rule)
 
     both = [*base, target]
     add_interval("selected_target", [target], probability(rows, [target]))
@@ -706,8 +732,8 @@ def full_linear_program_text(
             "",
             (
                 "Estas regras nao dependem da consulta escolhida pelo usuario. "
-                "Elas sao mineradas da base categorizada e incorporadas ao programa linear "
-                "quando possuem suporte, confianca e lift positivos acima dos limiares do projeto."
+                "Elas sao a saida do algoritmo de aprendizagem de regras; o programa linear "
+                "consome suporte, confianca e lift ja retornados por esse algoritmo."
             ),
             (
                 f"Limiar usado: suporte >= {MIN_LEARNED_RULE_SUPPORT:.3f}, "
@@ -783,7 +809,13 @@ def full_linear_program_text(
                     f"  {index}. {item['lower']:.3f} <= {item['expression']} <= {item['upper']:.3f}"
                 )
             else:
-                lines.append(f"  {index}. {item['expression']}")
+                suffix = ""
+                if item.get("source"):
+                    suffix = (
+                        f" | fonte={item['source']}; "
+                        f"suporte={item.get('support', 0):.3f}; lift={item.get('lift', 0):.3f}"
+                    )
+                lines.append(f"  {index}. {item['expression']}{suffix}")
         lines.append("")
 
     return "\n".join(lines)

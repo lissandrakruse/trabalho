@@ -308,6 +308,19 @@ def build_linear_constraints(
         b_ub.append(0.0)
         summary[kind] += 1
 
+    def add_learned_confidence_rule(rule: dict[str, Any]) -> None:
+        antecedent = rule["antecedent"]
+        consequent = rule["consequent"]
+        both = [*antecedent, *consequent]
+        lower, upper = rounded_interval(rule["confidence"])
+        antecedent_mask = world_mask(worlds, antecedent)
+        both_mask = world_mask(worlds, both)
+        a_ub.append(add_vectors(both_mask, antecedent_mask, -upper))
+        b_ub.append(0.0)
+        a_ub.append(add_vectors([-item for item in both_mask], antecedent_mask, lower))
+        b_ub.append(0.0)
+        summary["learnedAssociationRule"] += 1
+
     for attribute in data["attributes"]:
         for value in data["domains"][attribute]:
             conditions = [{"attribute": attribute, "value": value}]
@@ -324,7 +337,7 @@ def build_linear_constraints(
                     add_interval("pairwiseJoint", conditions, probability(rows, conditions))
 
     for rule in mine_association_rules(rows, data["domains"]):
-        add_confidence_rule("learnedAssociationRule", rule["antecedent"], rule["consequent"])
+        add_learned_confidence_rule(rule)
 
     both = [*base, target]
     add_interval("selected", [target], probability(rows, [target]))

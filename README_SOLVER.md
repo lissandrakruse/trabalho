@@ -168,6 +168,25 @@ O processo usado e:
 7. incorporar as 3 melhores regras ao programa linear
 ```
 
+Depois que a regra e aprendida, o programa linear nao precisa recalcular suporte
+e lift como se fossem uma nova consulta. Ele consome a propria saida do
+algoritmo de aprendizagem:
+
+```text
+regra = {
+  antecedente,
+  consequente,
+  suporte,
+  confianca,
+  lift
+}
+```
+
+Ou seja, as probabilidades ligadas a suporte, confianca e lift sao tratadas
+como metricas retornadas pelo minerador de regras. O PL usa principalmente a
+confianca da regra aprendida para criar a restricao linear; suporte e lift
+ficam registrados como evidencia de que a regra foi aceita pelo algoritmo.
+
 Limiar atual:
 
 ```text
