@@ -281,7 +281,7 @@ async function generateSolverReport() {
     solverComparison.innerHTML = `<p><strong>Relatorio comparativo:</strong> ${escapeHtml(error.message)}</p>`;
   } finally {
     generateSolverReportButton.disabled = false;
-    generateSolverReportButton.textContent = "Gerar Relatorio Comparativo";
+    generateSolverReportButton.textContent = "Resolver e Gerar Relatorio de Comparacao";
   }
 }
 

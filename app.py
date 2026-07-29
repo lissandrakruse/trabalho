@@ -537,7 +537,7 @@ def build_solver_comparison(payload: dict[str, Any]) -> dict[str, Any]:
         "main": main_result,
         "standaloneSolver": solver_result,
         "comparison": compare_solver_result(main_result, solver_result),
-        "message": "Comparacao executada com o solver separado scripts/solve_query.py.",
+        "message": "Os mesmos dados da consulta foram resolvidos pelo solver separado scripts/solve_query.py e comparados com o projeto.",
     }
 
 
@@ -786,6 +786,12 @@ def write_solver_comparison_report(result: dict[str, Any]) -> None:
         Paragraph("Relatorio Comparativo: Projeto x Solver Separado", title),
         Spacer(1, 0.2 * cm),
         Paragraph(f"Consulta comparada: P({target} | {conditions})", body),
+        Paragraph(
+            "Os dados de entrada usados neste relatorio sao exatamente os mesmos informados "
+            "na interface do projeto: o evento A escolhido na pergunta e as afirmacoes B "
+            "selecionadas pelo usuario.",
+            body,
+        ),
         Paragraph(
             "O projeto principal calcula as probabilidades pela API Flask da interface. "
             "O solver separado executa o modulo scripts/solve_query.py, usando o mesmo dataset, "
