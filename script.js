@@ -130,7 +130,7 @@ async function runQuery() {
     linearProgram.textContent = "";
   } finally {
     runQueryButton.disabled = false;
-    runQueryButton.textContent = "Resolver consulta";
+    runQueryButton.textContent = "Consultar";
   }
 }
 
