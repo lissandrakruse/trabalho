@@ -1,6 +1,6 @@
 # Deploy no Render
 
-Este projeto e um site estatico. Ele usa `index.html`, `styles.css`, `script.js` e o dataset `data/Crop_recommendation.csv`.
+Este projeto agora roda como aplicacao Python Flask. O frontend chama a API Python para calcular suporte, confianca, lift e o intervalo por programacao linear.
 
 ## Pelo render.yaml
 
@@ -11,11 +11,12 @@ Este projeto e um site estatico. Ele usa `index.html`, `styles.css`, `script.js`
 
 ## Manualmente
 
-Se criar como **Static Site**:
+Se criar como **Web Service**:
 
 ```text
-Build Command: echo "Static site ready"
-Publish Directory: .
+Runtime: Python
+Build Command: python -m pip install --upgrade pip setuptools wheel && python -m pip install -r requirements.txt
+Start Command: gunicorn app:app --bind 0.0.0.0:$PORT --timeout 120
 ```
 
 Nao precisa configurar variaveis de ambiente.

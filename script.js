@@ -11,88 +11,15 @@ const countValue = document.querySelector("#countValue");
 const probabilityText = document.querySelector("#probabilityText");
 const linearProgram = document.querySelector("#linearProgram");
 
-const numericAttributes = ["N", "P", "K", "temperature", "humidity", "ph", "rainfall"];
-const labelMap = {
-  N: "Nitrogenio",
-  P: "Fosforo",
-  K: "Potassio",
-  temperature: "Temperatura",
-  humidity: "Umidade",
-  ph: "pH",
-  rainfall: "Chuva",
-  label: "Cultura",
-};
-
-let rows = [];
-let categoricalRows = [];
 let domains = {};
-let thresholds = {};
+let labels = {};
 
-function parseCsv(text) {
-  const lines = text.trim().split(/\r?\n/);
-  const headers = lines.shift().split(",");
-  return lines.map((line) => {
-    const values = line.split(",");
-    return Object.fromEntries(headers.map((header, index) => [header, values[index]]));
-  });
-}
-
-function quantile(values, q) {
-  const sorted = [...values].sort((a, b) => a - b);
-  const position = (sorted.length - 1) * q;
-  const base = Math.floor(position);
-  const rest = position - base;
-  if (sorted[base + 1] === undefined) return sorted[base];
-  return sorted[base] + rest * (sorted[base + 1] - sorted[base]);
-}
-
-function buildThresholds(rawRows) {
-  numericAttributes.forEach((attribute) => {
-    const values = rawRows.map((row) => Number(row[attribute])).filter(Number.isFinite);
-    thresholds[attribute] = {
-      low: quantile(values, 1 / 3),
-      high: quantile(values, 2 / 3),
-    };
-  });
-}
-
-function categoryFor(attribute, value) {
-  const number = Number(value);
-  if (attribute === "ph") {
-    if (number < 6) return "acido";
-    if (number <= 7.5) return "neutro";
-    return "alcalino";
-  }
-  const threshold = thresholds[attribute];
-  if (number <= threshold.low) return "baixo";
-  if (number <= threshold.high) return "medio";
-  return "alto";
-}
-
-function categorizeRows(rawRows) {
-  return rawRows.map((row) => {
-    const categorized = {};
-    numericAttributes.forEach((attribute) => {
-      categorized[attribute] = categoryFor(attribute, row[attribute]);
-    });
-    categorized.label = row.label;
-    return categorized;
-  });
-}
-
-function buildDomains() {
-  domains = {};
-  Object.keys(categoricalRows[0]).forEach((attribute) => {
-    domains[attribute] = [...new Set(categoricalRows.map((row) => row[attribute]))].sort();
-  });
-}
-
-function fillSelect(select, values) {
+function fillSelect(select, values, labeler = (value) => value) {
   select.innerHTML = "";
   values.forEach((value) => {
     const option = document.createElement("option");
     option.value = value;
-    option.textContent = labelMap[value] || value;
+    option.textContent = labeler(value);
     select.appendChild(option);
   });
 }
@@ -108,7 +35,7 @@ function createConditionRow(attribute = "ph", value = "acido") {
   const attributeLabel = document.createElement("label");
   attributeLabel.textContent = "Atributo";
   const attributeSelect = document.createElement("select");
-  fillSelect(attributeSelect, Object.keys(domains));
+  fillSelect(attributeSelect, Object.keys(domains), (item) => labels[item] || item);
   attributeSelect.value = attribute;
   attributeLabel.appendChild(attributeSelect);
 
@@ -139,31 +66,9 @@ function readConditions() {
   });
 }
 
-function matches(row, conditions) {
-  return conditions.every((condition) => row[condition.attribute] === condition.value);
-}
-
-function probability(conditions) {
-  if (!conditions.length) return 1;
-  return categoricalRows.filter((row) => matches(row, conditions)).length / categoricalRows.length;
-}
-
-function count(conditions) {
-  if (!conditions.length) return categoricalRows.length;
-  return categoricalRows.filter((row) => matches(row, conditions)).length;
-}
-
 function fmt(value) {
-  if (!Number.isFinite(value)) return "-";
-  return value.toFixed(3);
-}
-
-function interval(value) {
-  const rounded = Math.round(value * 1000) / 1000;
-  return {
-    lower: Math.max(0, rounded - 0.001),
-    upper: Math.min(1, rounded + 0.001),
-  };
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return "-";
+  return Number(value).toFixed(3);
 }
 
 function eventLabel(conditions) {
@@ -171,78 +76,60 @@ function eventLabel(conditions) {
   return conditions.map((condition) => `${condition.attribute}=${condition.value}`).join(", ");
 }
 
-function linearExpression(conditions) {
-  if (!conditions.length) return "1";
-  return `soma(x_w para w onde ${eventLabel(conditions)})`;
-}
+async function runQuery() {
+  runQueryButton.disabled = true;
+  runQueryButton.textContent = "Resolvendo...";
+  const payload = {
+    conditions: readConditions(),
+    target: {
+      attribute: targetAttribute.value,
+      value: targetValue.value,
+    },
+  };
 
-function renderLinearProgram(target, base, pA, pB, pAB) {
-  const iA = interval(pA);
-  const iB = interval(pB);
-  const iAB = interval(pAB);
-  const numerator = linearExpression([...base, target]);
-  const denominator = linearExpression(base);
+  try {
+    const response = await fetch("/api/query", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const result = await response.json();
+    if (!response.ok || !result.ok) throw new Error(result.error || "Erro na consulta.");
 
-  return [
-    "Variaveis:",
-    "  x_w >= 0 para cada mundo possivel w da base categorizada",
-    "",
-    "Restricao de normalizacao:",
-    "  soma(x_w) = 1",
-    "",
-    "Restricoes extraidas da base:",
-    `  ${fmt(iA.lower)} <= P(A) = ${linearExpression([target])} <= ${fmt(iA.upper)}`,
-    `  ${fmt(iB.lower)} <= P(B) = ${denominator} <= ${fmt(iB.upper)}`,
-    `  ${fmt(iAB.lower)} <= P(A e B) = ${numerator} <= ${fmt(iAB.upper)}`,
-    "",
-    "Funcao objetivo da consulta:",
-    `  P(A | B) = P(A e B) / P(B)`,
-    "",
-    "Forma linear usada no relatorio:",
-    `  minimizar ${numerator}, fixando P(B) dentro do intervalo observado`,
-    `  maximizar ${numerator}, fixando P(B) dentro do intervalo observado`,
-    "",
-    "Resultado empirico:",
-    `  A = ${eventLabel([target])}`,
-    `  B = ${eventLabel(base)}`,
-  ].join("\n");
-}
+    supportValue.textContent = fmt(result.support);
+    confidenceValue.textContent = fmt(result.confidence);
+    liftValue.textContent = fmt(result.lift);
+    countValue.textContent = `${result.countBoth}/${result.countBase}`;
 
-function runQuery() {
-  const base = readConditions();
-  const target = { attribute: targetAttribute.value, value: targetValue.value };
-  const both = [...base, target];
-  const pA = probability([target]);
-  const pB = probability(base);
-  const pAB = probability(both);
-  const confidence = pB > 0 ? pAB / pB : Number.NaN;
-  const lift = pA > 0 && pB > 0 ? confidence / pA : Number.NaN;
-  const baseCount = count(base);
-  const bothCount = count(both);
+    const linearInterval = result.linear?.ok
+      ? `<div><strong>Intervalo linear:</strong> ${fmt(result.linear.lower)} <= P(A | B) <= ${fmt(result.linear.upper)}.</div>`
+      : `<div><strong>Intervalo linear:</strong> solver indisponível.</div>`;
 
-  supportValue.textContent = fmt(pAB);
-  confidenceValue.textContent = fmt(confidence);
-  liftValue.textContent = fmt(lift);
-  countValue.textContent = `${bothCount}/${baseCount}`;
-
-  probabilityText.innerHTML = [
-    `<div><strong>Regra:</strong> se ${eventLabel(base)}, então ${eventLabel([target])}.</div>`,
-    `<div><strong>Suporte:</strong> ${fmt(pAB)} representa P(A e B), a proporção da base que satisfaz pergunta e afirmações.</div>`,
-    `<div><strong>Confiança/Precisão:</strong> ${fmt(confidence)} representa P(A | B), isto é, entre os registros que satisfazem B, quantos também satisfazem A.</div>`,
-    `<div><strong>Probabilidades marginais:</strong> P(A)=${fmt(pA)} e P(B)=${fmt(pB)}.</div>`,
-  ].join("");
-  linearProgram.textContent = renderLinearProgram(target, base, pA, pB, pAB);
+    probabilityText.innerHTML = [
+      `<div><strong>Regra:</strong> se ${eventLabel(result.conditions)}, então ${eventLabel([result.target])}.</div>`,
+      `<div><strong>Suporte:</strong> ${fmt(result.support)} representa P(A e B).</div>`,
+      `<div><strong>Confiança/Precisão:</strong> ${fmt(result.confidence)} representa P(A | B).</div>`,
+      `<div><strong>Lift:</strong> ${fmt(result.lift)} compara a regra com a probabilidade marginal de A.</div>`,
+      `<div><strong>Marginais:</strong> P(A)=${fmt(result.pA)} e P(B)=${fmt(result.pB)}.</div>`,
+      linearInterval,
+    ].join("");
+    linearProgram.textContent = result.linearProgram;
+  } catch (error) {
+    probabilityText.innerHTML = `<div><strong>Erro:</strong> ${error.message}</div>`;
+    linearProgram.textContent = "";
+  } finally {
+    runQueryButton.disabled = false;
+    runQueryButton.textContent = "Resolver consulta";
+  }
 }
 
 async function boot() {
-  const response = await fetch("data/Crop_recommendation.csv");
-  const text = await response.text();
-  rows = parseCsv(text);
-  buildThresholds(rows);
-  categoricalRows = categorizeRows(rows);
-  buildDomains();
+  const response = await fetch("/api/metadata");
+  const metadata = await response.json();
+  domains = metadata.domains;
+  labels = metadata.labels;
 
-  fillSelect(targetAttribute, Object.keys(domains));
+  fillSelect(targetAttribute, Object.keys(domains), (item) => labels[item] || item);
   targetAttribute.value = "label";
   fillValueSelect(targetAttribute, targetValue);
   targetValue.value = "rice";
@@ -253,7 +140,7 @@ async function boot() {
 
   createConditionRow("ph", "acido");
   createConditionRow("rainfall", "alto");
-  datasetStatus.textContent = `${rows.length} registros carregados`;
+  datasetStatus.textContent = `${metadata.total} registros carregados`;
   runQuery();
 }
 
