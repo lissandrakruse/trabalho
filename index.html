@@ -76,8 +76,13 @@
 
         <section class="panel">
           <div class="panel-head">
-            <h2>Comparacao com Solver Separado</h2>
-            <span id="solverCompareStatus">Aguardando execucao</span>
+            <h2>Compara&ccedil;&atilde;o com Solver Separado</h2>
+            <span id="solverCompareStatus">Aguardando execu&ccedil;&atilde;o</span>
+          </div>
+          <div class="solver-note">
+            O solver usado &eacute; o <strong>HiGHS</strong>, executado por <strong>scipy.optimize.linprog</strong>.
+            Ele resolve o programa linear depois da transforma&ccedil;&atilde;o de Charnes-Cooper.
+            Este bot&atilde;o chama o m&oacute;dulo separado <strong>scripts/solve_query.py</strong> e compara sua sa&iacute;da com o c&aacute;lculo principal da interface.
           </div>
           <div class="solver-comparison" id="solverComparison"></div>
         </section>

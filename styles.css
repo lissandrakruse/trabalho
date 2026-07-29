@@ -271,6 +271,21 @@ select {
   color: #27343c;
 }
 
+.solver-note {
+  margin-bottom: 14px;
+  padding: 12px;
+  border: 1px solid #dbe5e9;
+  border-radius: 8px;
+  background: #f7faf9;
+  color: #43535d;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.solver-note strong {
+  color: #17352f;
+}
+
 .solver-comparison p {
   margin-bottom: 12px;
   color: #43535d;
