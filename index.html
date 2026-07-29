@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Probabilidades do Solo</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="workspace">
+        <header class="topbar">
+          <div>
+            <h1>Probabilidades do Solo</h1>
+            <p>Consulta categórica, regras de associação e formulação linear sobre o dataset treinado.</p>
+          </div>
+          <div class="dataset-status" id="datasetStatus">Carregando dataset...</div>
+        </header>
+
+        <section class="panel controls-panel">
+          <div class="panel-head">
+            <h2>Afirmações</h2>
+            <button class="icon-button" id="addCondition" type="button" title="Adicionar condição">+</button>
+          </div>
+          <div class="condition-list" id="conditionList"></div>
+        </section>
+
+        <section class="panel query-panel">
+          <div class="panel-head">
+            <h2>Pergunta</h2>
+            <span>P(A | B)</span>
+          </div>
+          <div class="query-grid">
+            <label>
+              Evento A
+              <select id="targetAttribute"></select>
+            </label>
+            <label>
+              Valor
+              <select id="targetValue"></select>
+            </label>
+          </div>
+          <button class="primary-action" id="runQuery" type="button">Resolver consulta</button>
+        </section>
+
+        <section class="results-grid">
+          <article class="metric-card">
+            <span>Suporte P(A e B)</span>
+            <strong id="supportValue">-</strong>
+          </article>
+          <article class="metric-card">
+            <span>Confiança P(A | B)</span>
+            <strong id="confidenceValue">-</strong>
+          </article>
+          <article class="metric-card">
+            <span>Lift</span>
+            <strong id="liftValue">-</strong>
+          </article>
+          <article class="metric-card">
+            <span>Instâncias usadas</span>
+            <strong id="countValue">-</strong>
+          </article>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Resultado Probabilístico</h2>
+          </div>
+          <div class="explanation" id="probabilityText"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Programa Linear</h2>
+          </div>
+          <pre class="lp-box" id="linearProgram"></pre>
+        </section>
+      </section>
+    </main>
+
+    <script src="script.js"></script>
+  </body>
+</html>
