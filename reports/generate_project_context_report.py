@@ -171,6 +171,48 @@ def build_report() -> None:
         )
     )
 
+    heading(story, "6.1 Fundamentacao explicada", h2)
+    story.append(
+        Paragraph(
+            "A fundamentacao do codigo parte da ideia de que uma base categorica pode ser "
+            "vista como fonte empirica de conhecimento probabilistico. Cada frequencia observada "
+            "no dataset fornece uma estimativa de probabilidade. Em vez de usar essas estimativas "
+            "apenas como valores isolados, o projeto as transforma em restricoes lineares. Assim, "
+            "o solver nao calcula uma unica resposta direta; ele calcula os menores e maiores "
+            "valores de P(A | B) que ainda sao compativeis com as evidencias extraidas da base.",
+            body,
+        )
+    )
+    story.append(
+        Paragraph(
+            "A variavel x_w representa a probabilidade de um mundo possivel w. Um mundo possivel "
+            "e uma combinacao categorica observada ou representada a partir da base. A restricao "
+            "soma(x_w)=1 garante que todas essas massas formem uma distribuicao de probabilidade. "
+            "As restricoes de marginais e conjuntas, como P(A), P(B) e P(A e B), limitam a soma "
+            "das variaveis x_w que satisfazem cada evento.",
+            body,
+        )
+    )
+    story.append(
+        Paragraph(
+            "As regras de associacao sao interpretadas como B -> A. O suporte mede P(A e B), "
+            "a confianca mede P(A | B) e o lift compara P(A | B) com P(A). Quando o suporte "
+            "conjunto e zero, a consulta pode ser exibida ao usuario, mas nao deve ser inserida "
+            "como restricao ativa de confianca, pois o dataset nao aprendeu evidencia positiva "
+            "para aquela regra.",
+            body,
+        )
+    )
+    story.append(
+        Paragraph(
+            "Como P(A | B)=P(A e B)/P(B) e uma razao, a consulta nao entra diretamente como "
+            "objetivo linear. Por isso foi aplicada a transformacao de Charnes-Cooper: a razao "
+            "e reescrita com variaveis transformadas, fixa-se a massa de B e o solver consegue "
+            "minimizar e maximizar a probabilidade condicional em formato linear.",
+            body,
+        )
+    )
+
     heading(story, "7. Solver", h2)
     story.append(
         Paragraph(

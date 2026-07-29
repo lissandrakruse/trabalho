@@ -264,6 +264,48 @@ def build_report() -> None:
     )
     story.append(sources)
 
+    add_heading(story, "5.1 Como a fundamentacao virou codigo", h2)
+    story.append(
+        Paragraph(
+            "A implementacao foi organizada como uma cadeia de inferencia probabilistica. "
+            "Primeiro, o dataset e carregado e categorizado. Depois, o sistema minera "
+            "frequencias empiricas para calcular probabilidades marginais, conjuntas e "
+            "condicionais. Em seguida, a consulta escolhida pelo usuario e interpretada "
+            "como uma regra explicita B -> A, com suporte, confianca e lift.",
+            body,
+        )
+    )
+    story.append(
+        Paragraph(
+            "Na etapa de programacao linear, cada mundo possivel w recebe uma variavel x_w. "
+            "A normalizacao soma(x_w)=1 garante uma distribuicao valida. As probabilidades "
+            "mineradas sao transformadas em restricoes intervalares do tipo L <= soma(x_w "
+            "onde o evento ocorre) <= U. Isso inclui marginais, conjuntas por pares, "
+            "restricoes da consulta selecionada e, quando houver suporte positivo, a regra "
+            "de associacao selecionada.",
+            body,
+        )
+    )
+    story.append(
+        Paragraph(
+            "A consulta P(A | B) e uma funcao fracionaria, pois depende de P(A e B)/P(B). "
+            "Para manter o problema compativel com um solver de programacao linear, o projeto "
+            "usa a transformacao de Charnes-Cooper. Depois da transformacao, o HiGHS, chamado "
+            "por scipy.optimize.linprog, resolve duas otimizacoes: uma para o limite inferior "
+            "e outra para o limite superior da probabilidade condicional.",
+            body,
+        )
+    )
+    story.append(
+        Paragraph(
+            "A validacao foi implementada com um solver separado. A interface envia a mesma "
+            "consulta para esse script independente e compara suporte, confianca, lift, "
+            "intervalo linear e tempo de execucao. Desse modo, o projeto mostra tanto o "
+            "resultado principal quanto uma verificacao externa da montagem do modelo.",
+            body,
+        )
+    )
+
     add_heading(story, "6. Justificativa das escolhas", h2)
     story.append(
         Paragraph(
