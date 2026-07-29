@@ -1035,7 +1035,7 @@ def build_solver_comparison(payload: dict[str, Any]) -> dict[str, Any]:
         "comparison": compare_solver_result(main_result, solver_result),
         "timing": compare_solver_timing(main_result, solver_result),
         "solverCatalog": solver_catalog(),
-        "message": "Os mesmos dados da consulta foram resolvidos pelo script separado com 3 metodos HiGHS e comparados com o projeto.",
+        "message": "Comparacao executada com 3 metodos reais do HiGHS: highs, highs-ds e highs-ipm, todos usando os mesmos parametros escolhidos na interface.",
     }
 
 
@@ -1354,7 +1354,7 @@ def write_solver_comparison_report(result: dict[str, Any]) -> None:
         )
     )
 
-    engine_rows = [["Solver", "Suporte", "Confianca", "Lift", "Intervalo", "Tempo (s)", "Status"]]
+    engine_rows = [["Solver", "Metodo SciPy", "Suporte", "Confianca", "Lift", "Intervalo", "Tempo (s)", "Status"]]
     for engine in result.get("solverEngineResults", []):
         interval = (
             f"{format_report_metric(engine.get('lower'))} - {format_report_metric(engine.get('upper'))}"
@@ -1364,6 +1364,7 @@ def write_solver_comparison_report(result: dict[str, Any]) -> None:
         engine_rows.append(
             [
                 engine["name"],
+                engine.get("method", "-"),
                 format_report_metric(engine.get("support")),
                 format_report_metric(engine.get("confidence")),
                 format_report_metric(engine.get("lift")),
@@ -1374,7 +1375,7 @@ def write_solver_comparison_report(result: dict[str, Any]) -> None:
         )
     engine_table = Table(
         engine_rows,
-        colWidths=[3.6 * cm, 1.8 * cm, 2.0 * cm, 1.7 * cm, 2.8 * cm, 1.8 * cm, 2.0 * cm],
+        colWidths=[3.0 * cm, 2.0 * cm, 1.6 * cm, 1.7 * cm, 1.4 * cm, 2.5 * cm, 1.6 * cm, 1.9 * cm],
     )
     engine_table.setStyle(
         TableStyle(
@@ -1429,7 +1430,12 @@ def write_solver_comparison_report(result: dict[str, Any]) -> None:
             body,
         ),
         Spacer(1, 0.12 * cm),
-        Paragraph("Tres solvers executados com a consulta da interface", styles["Heading2"]),
+        Paragraph("Comparacao entre 3 metodos de solver executados", styles["Heading2"]),
+        Paragraph(
+            "A tabela abaixo nao e apenas uma lista de referencias: estes tres metodos foram "
+            "executados pelo script separado com a mesma consulta da interface.",
+            body,
+        ),
         engine_table,
         Spacer(1, 0.16 * cm),
         Paragraph("Solvers considerados", styles["Heading2"]),

@@ -183,6 +183,7 @@ function renderSolverComparison(result) {
     return [
       `<tr>`,
       `<td>${escapeHtml(engine.name)}</td>`,
+      `<td>${escapeHtml(engine.method)}</td>`,
       `<td>${fmtCompare(engine.support)}</td>`,
       `<td>${fmtCompare(engine.confidence)}</td>`,
       `<td>${fmtCompare(engine.lift)}</td>`,
@@ -212,7 +213,7 @@ function renderSolverComparison(result) {
   solverComparison.innerHTML = [
     `<p>${escapeHtml(result.message)}</p>`,
     engineRows.length
-      ? `<h3>3 solvers executados com os parametros da interface</h3><table><thead><tr><th>Solver</th><th>Suporte</th><th>Confianca</th><th>Lift</th><th>Intervalo</th><th>Variaveis</th><th>Restricoes</th><th>Tempo (s)</th><th>Status</th></tr></thead><tbody>${engineRows.join("")}</tbody></table>`
+      ? `<h3>Comparacao entre 3 metodos de solver executados</h3><p>Os tres metodos abaixo foram executados de verdade pelo script separado <strong>scripts/solve_query.py</strong>, usando exatamente o mesmo A e o mesmo B escolhidos na interface.</p><table><thead><tr><th>Solver</th><th>Metodo SciPy</th><th>Suporte</th><th>Confianca</th><th>Lift</th><th>Intervalo</th><th>Variaveis</th><th>Restricoes</th><th>Tempo (s)</th><th>Status</th></tr></thead><tbody>${engineRows.join("")}</tbody></table>`
       : "",
     catalogRows.length
       ? `<h3>Solvers considerados</h3><table><thead><tr><th>Solver</th><th>Status</th><th>Comparacao</th></tr></thead><tbody>${catalogRows.join("")}</tbody></table>`
