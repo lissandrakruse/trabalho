@@ -96,6 +96,38 @@ function fmtCompare(value) {
   return Number.isInteger(number) ? String(number) : number.toFixed(3);
 }
 
+function ruleFromResult(result) {
+  if (result.releasedAssociationRule) return result.releasedAssociationRule;
+
+  const support = Number(result.support ?? result.pAB);
+  const confidence = Number(result.confidence ?? (
+    Number(result.countBase) > 0 ? Number(result.countBoth) / Number(result.countBase) : NaN
+  ));
+  const lift = Number(result.lift ?? (
+    Number(result.pA) > 0 ? confidence / Number(result.pA) : NaN
+  ));
+
+  if (
+    Number(result.countBase) <= 0
+    || Number(result.countBoth) <= 0
+    || Number.isNaN(support)
+    || Number.isNaN(confidence)
+    || Number.isNaN(lift)
+  ) {
+    return null;
+  }
+
+  return {
+    antecedent: result.conditions,
+    consequent: [result.target],
+    support,
+    confidence,
+    lift,
+    reason: "regra calculada pela interface a partir das evidencias empiricas da consulta",
+    released: true,
+  };
+}
+
 function eventLabel(conditions) {
   if (!conditions.length) return "verdadeiro";
   return conditions.map((condition) => `${condition.attribute}=${condition.value}`).join(", ");
@@ -279,10 +311,10 @@ function renderMathModel(result) {
     ? `${fmt(result.linear.lower)} <= P(A | B) <= ${fmt(result.linear.upper)}`
     : "Nao calculado para esta consulta.";
   const learnedRules = result.learnedAssociationRules || [];
-  const releasedRule = result.releasedAssociationRule || null;
+  const releasedRule = ruleFromResult(result);
   const releasedRuleText = releasedRule
     ? `<code>${eventLabel(releasedRule.antecedent)} -> ${eventLabel(releasedRule.consequent)}; suporte=${fmt(releasedRule.support)}, confianca=${fmt(releasedRule.confidence)}, lift=${fmt(releasedRule.lift)}</code>`
-    : `<code>A consulta ${eventLabel(result.conditions)} -> ${eventLabel([result.target])} nao foi liberada pela extracao; suporte, confianca e lift ficam sem valor.</code>`;
+    : `<code>A consulta ${eventLabel(result.conditions)} -> ${eventLabel([result.target])} nao tem suporte empirico positivo; suporte, confianca e lift ficam sem valor.</code>`;
   const learnedRuleItems = learnedRules.length
     ? learnedRules
         .map((rule) => `<code>${eventLabel(rule.antecedent)} -> ${eventLabel(rule.consequent)}; sup=${fmt(rule.support)}, conf=${fmt(rule.confidence)}, lift=${fmt(rule.lift)}</code>`)
@@ -293,7 +325,7 @@ function renderMathModel(result) {
     `<section class="math-block"><h3>1. Preparacao da base</h3><p>O projeto le o dataset de recomendacao de culturas, transforma atributos numericos em faixas categoricas e deixa cada registro pronto para perguntas do tipo <strong>P(A | B)</strong>. Nesta consulta, A = <strong>${aLabel}</strong> e B = <strong>${bLabel}</strong>.</p><div class="constraint-list"><code>A = ${aLabel}</code><code>B = ${bLabel}</code><code>A e B = ${abLabel}</code></div></section>`,
     `<section class="math-block"><h3>2. Mundos possiveis</h3><p>Cada combinacao categorica observada na base vira um mundo possivel <strong>w</strong>. O programa cria uma variavel <strong>x<sub>w</sub></strong> para representar a massa de probabilidade daquele mundo.</p><div class="constraint-list"><code>x<sub>w</sub> >= 0, para todo w em W</code><code>|W| = ${variableCount}</code><code>sum<sub>w em W</sub> x<sub>w</sub> = 1</code></div></section>`,
     `<section class="math-block"><h3>3. Evidencias empiricas</h3><p>As frequencias da base nao sao apresentadas como regras automaticamente. Elas entram no programa linear como restricoes intervalares para eventos observados: marginais, conjuntas por pares e evidencias da consulta.</p><div class="constraint-list"><code>P(A): ${intervalText(result.pA)}</code><code>P(B): ${intervalText(result.pB)}</code><code>P(A e B): ${intervalText(result.pAB)}</code><code>L <= sum(x<sub>w</sub> onde evento) <= U</code></div></section>`,
-    `<section class="math-block"><h3>4. Regras liberadas</h3><p>Suporte, confianca e lift pertencem a ferramenta de extracao de regras. A interface so mostra esses tres valores quando a regra consultada foi gerada e liberada pelo minerador.</p><div class="constraint-list"><code>suporte(R -> S) = P(R e S)</code><code>confianca(R -> S) = P(S | R)</code><code>lift(R -> S) = confianca / P(S)</code>${releasedRuleText}</div></section>`,
+    `<section class="math-block"><h3>4. Regras liberadas</h3><p>Suporte, confianca e lift sao calculados para a regra da consulta atual quando existem ocorrencias de B e de A e B no dataset.</p><div class="constraint-list"><code>suporte(R -> S) = P(R e S)</code><code>confianca(R -> S) = P(S | R)</code><code>lift(R -> S) = confianca / P(S)</code>${releasedRuleText}</div></section>`,
     `<section class="math-block"><h3>5. Regras no PL</h3><p>Antes da consulta, o sistema minera regras gerais do dataset e incorpora as melhores como conhecimento aprendido. Quando a consulta B -> A tambem foi liberada, ela entra como restricao de confianca; caso contrario, ela continua sendo uma pergunta, mas nao vira metrica de regra.</p><div class="constraint-list"><code>limiares: suporte >= 0.010; confianca >= 0.200; lift >= 1.050</code><code>L <= P(R e S) / P(R) <= U</code><code>P(R e S) - U.P(R) <= 0</code><code>-P(R e S) + L.P(R) <= 0</code>${learnedRuleItems}</div></section>`,
     `<section class="math-block"><h3>6. Classificacao</h3><p>Como a base possui uma variavel de classe, o projeto tambem interpreta a regra B -> A como classificador binario para calcular acuracia, precisao, recall e F1. Em uma extensao, o mesmo fluxo pode listar P(c | x) para cada classe c e cada valor x dos atributos.</p><div class="constraint-list"><code>precisao = VP / (VP + FP)</code><code>recall = VP / (VP + FN)</code><code>F1 = 2.precisao.recall / (precisao + recall)</code></div></section>`,
     `<section class="math-block"><h3>7. Consulta condicional</h3><p>A pergunta final continua sendo probabilistica: qual intervalo e possivel para A quando B ocorre, respeitando as evidencias da base e as regras liberadas?</p><code>P(A | B) = P(A e B) / P(B) = sum(x<sub>w</sub> onde ${abLabel}) / sum(x<sub>w</sub> onde ${bLabel})</code></section>`,
@@ -326,7 +358,7 @@ async function runQuery() {
     if (!response.ok || !result.ok) throw new Error(result.error || "Erro na consulta.");
 
     const queriedRule = result.queriedAssociationRule || null;
-    const releasedRule = result.releasedAssociationRule || null;
+    const releasedRule = ruleFromResult(result);
     supportValue.textContent = releasedRule ? fmt(releasedRule.support) : "-";
     confidenceValue.textContent = releasedRule ? fmt(releasedRule.confidence) : "-";
     liftValue.textContent = releasedRule ? fmt(releasedRule.lift) : "-";
@@ -344,8 +376,8 @@ async function runQuery() {
       ? `<div><strong>Contagem empirica:</strong> existem ${result.countBase} registros que satisfazem B, mas nenhum deles tambem satisfaz A.</div>`
       : "";
     const releasedRuleNotice = releasedRule
-      ? `<div><strong>Regra liberada encontrada:</strong> os cards usam suporte, confianca e lift fornecidos pela ferramenta de extracao de regras.</div>`
-      : `<div><strong>Sem regra liberada:</strong> a ferramenta de extracao nao gerou/liberou uma regra exatamente igual a esta consulta. Por isso suporte, confianca e lift ficam sem valor nos cards.</div>`;
+      ? `<div><strong>Regra liberada encontrada:</strong> os cards usam suporte, confianca e lift calculados para a consulta atual.</div>`
+      : `<div><strong>Sem regra liberada:</strong> a consulta nao tem suporte empirico positivo. Por isso suporte, confianca e lift ficam sem valor nos cards.</div>`;
     const ruleMetricContent = releasedRule
       ? [
           `<div><strong>Suporte:</strong> ${fmt(releasedRule.support)} fornecido pela regra liberada.</div>`,
@@ -358,7 +390,7 @@ async function runQuery() {
       : "";
     const conclusionContent = releasedRule
       ? result.conclusion
-      : `Para ${eventLabel(result.conditions)} -> ${eventLabel([result.target])}, a ferramenta de extracao nao liberou uma regra. A interface mostra apenas o status da extracao e mantem suporte, confianca e lift sem valor.`;
+      : `Para ${eventLabel(result.conditions)} -> ${eventLabel([result.target])}, nao ha suporte empirico positivo para liberar a regra. A interface mantem suporte, confianca e lift sem valor.`;
     const ruleLabel = releasedRule ? "Regra liberada" : "Consulta sem regra liberada";
     const learnedRuleCount = result.learnedAssociationRules?.length || 0;
     const topLearnedRule = result.learnedAssociationRules?.[0];
@@ -389,7 +421,7 @@ async function runQuery() {
     probabilityText.innerHTML = [
       zeroResultNotice,
       releasedRuleNotice,
-      `<div><strong>Metricas dos cards:</strong> suporte, confianca e lift aparecem somente quando a ferramenta de extracao libera a regra consultada; as demais regras liberadas aparecem separadas na tabela abaixo.</div>`,
+      `<div><strong>Metricas dos cards:</strong> suporte, confianca e lift aparecem quando a regra consultada tem ocorrencias empiricas; as regras globais aprendidas aparecem separadas na tabela abaixo.</div>`,
       `<div><strong>${ruleLabel}:</strong> se ${eventLabel(result.conditions)}, entao ${eventLabel([result.target])}.</div>`,
       ruleMetricContent,
       queriedRuleContent,
@@ -416,6 +448,7 @@ async function generateReport() {
   generateReportButton.disabled = true;
   generateReportButton.textContent = "Gerando...";
   const payload = buildPayload();
+  const reportWindow = window.open("", "_blank", "noopener");
 
   try {
     const response = await fetch("/api/report/query", {
@@ -428,8 +461,11 @@ async function generateReport() {
     const reportUrl = `${result.reportUrl}?t=${Date.now()}`;
     downloadReportLink.href = reportUrl;
     downloadReportLink.classList.remove("is-hidden");
-    window.open(reportUrl, "_blank", "noopener");
+    if (reportWindow) {
+      reportWindow.location = reportUrl;
+    }
   } catch (error) {
+    if (reportWindow) reportWindow.close();
     probabilityText.innerHTML += `<div><strong>Relatório:</strong> ${error.message}</div>`;
   } finally {
     generateReportButton.disabled = false;
@@ -443,6 +479,7 @@ async function generateSolverReport() {
   solverCompareStatus.textContent = "Resolvendo solver e gerando relatorio";
   solverComparison.innerHTML = "";
   downloadSolverReportLink.classList.add("is-hidden");
+  const reportWindow = window.open("", "_blank", "noopener");
 
   try {
     const response = await fetch("/api/report/solver-comparison", {
@@ -459,8 +496,11 @@ async function generateSolverReport() {
     const reportUrl = `${result.reportUrl}?t=${Date.now()}`;
     downloadSolverReportLink.href = reportUrl;
     downloadSolverReportLink.classList.remove("is-hidden");
-    window.open(reportUrl, "_blank", "noopener");
+    if (reportWindow) {
+      reportWindow.location = reportUrl;
+    }
   } catch (error) {
+    if (reportWindow) reportWindow.close();
     solverCompareStatus.textContent = "Erro no relatorio";
     solverComparison.innerHTML = `<p><strong>Relatorio comparativo:</strong> ${escapeHtml(error.message)}</p>`;
   } finally {
@@ -551,7 +591,7 @@ async function boot() {
   generateReportButton.addEventListener("click", generateReport);
   compareSolverButton.addEventListener("click", compareSolver);
   generateSolverReportButton.addEventListener("click", generateSolverReport);
-  generateFullLinearProgramButton.addEventListener("click", generateFullLinearProgram);
+  generateFullLinearProgramButton.addEventListener("click", () => generateFullLinearProgram(false));
   downloadFullLinearProgramLink.addEventListener("click", (event) => {
     event.preventDefault();
     if (downloadFullLinearProgramLink.classList.contains("is-disabled")) return;

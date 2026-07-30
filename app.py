@@ -447,8 +447,26 @@ def association_rule_payload(
         "confidence": rule["confidence"],
         "lift": rule["lift"],
         "released": True,
-        "reason": "liberada pela extracao de regras",
+        "reason": rule.get("source", "liberada pela extracao de regras"),
         "thresholds": thresholds,
+    }
+
+
+def query_association_rule(
+    rows: list[dict[str, str]],
+    antecedent: list[dict[str, str]],
+    consequent: list[dict[str, str]],
+) -> dict[str, Any] | None:
+    status = association_rule_status(rows, antecedent, consequent)
+    if not status["accepted"]:
+        return None
+    return {
+        "antecedent": antecedent,
+        "consequent": consequent,
+        "support": status["pBoth"],
+        "confidence": status["confidence"],
+        "lift": status["lift"],
+        "source": "regra calculada e liberada para a consulta atual",
     }
 
 
@@ -542,7 +560,7 @@ def build_linear_constraints(
     add_interval("selected_target", [target], probability(rows, [target]))
     add_interval("selected_base", base, probability(rows, base))
     add_interval("selected_joint", both, probability(rows, both))
-    selected_released_rule = find_released_association_rule(learned_rules, base, [target])
+    selected_released_rule = query_association_rule(rows, base, [target])
     if selected_released_rule is not None:
         add_released_confidence_rule(selected_released_rule, "selected_association_rule")
 
@@ -694,12 +712,12 @@ def linear_program_text(
         f"  {i_b[0]:.3f} <= P(B) = {denominator} <= {i_b[1]:.3f}",
         f"  {i_ab[0]:.3f} <= P(A e B) = {numerator} <= {i_ab[1]:.3f}",
         "  O LP completo tambem inclui marginais de cada valor e conjuntas por pares de valores.",
-        "  Observacao: P(A e B) e evidencia empirica do PL; nao e exibido como suporte da regra se a extracao nao liberar B -> A.",
+        "  Observacao: P(A e B) tambem e usado como suporte quando a regra B -> A da consulta e liberada.",
         "",
         "5. Regras de associacao:",
-        "  O minerador gera regras R -> S e retorna suporte, confianca e lift.",
-        "  O PL consome esses valores quando a regra foi liberada pela extracao.",
-        "  Se B -> A nao foi liberada, suporte, confianca e lift da consulta ficam sem valor.",
+        "  O sistema minera regras globais R -> S e tambem calcula a regra B -> A da consulta atual.",
+        "  O PL consome esses valores quando a regra tem suporte e confianca positivos.",
+        "  Se B -> A nao tiver suporte empirico, suporte, confianca e lift da consulta ficam sem valor.",
         "",
         "6. Classificacao:",
         "  Quando a base possui atributo de classe, a consulta pode ser avaliada como classificador binario.",
@@ -768,7 +786,7 @@ def full_linear_program_text(
         "1. O dataset e categorizado para permitir consultas logicas sobre atributos e valores.",
         "2. Cada combinacao observada vira um mundo possivel com uma variavel x_w.",
         "3. Frequencias empiricas viram restricoes intervalares do programa linear.",
-        "4. Regras de associacao so fornecem suporte, confianca e lift quando sao liberadas pela extracao.",
+        "4. Regras de associacao fornecem suporte, confianca e lift para a consulta atual quando ha suporte empirico.",
         "5. A consulta P(A | B) e resolvida por Charnes-Cooper e HiGHS.",
         "",
         "Variaveis originais:",
@@ -853,19 +871,19 @@ def full_linear_program_text(
             f"  {event_key(base)} -> {event_key([target])}",
         ]
     )
-    released_rule = find_released_association_rule(learned_rules, base, [target])
+    released_rule = query_association_rule(rows, base, [target])
     if released_rule is None:
         lines.extend(
             [
-                "  Status: nao liberada pela extracao de regras.",
-                "  Suporte, confianca e lift nao sao recalculados pelo programa para esta regra.",
+                "  Status: nao liberada para a consulta atual.",
+                "  Suporte, confianca e lift ficam sem valor porque P(B)=0 ou P(A e B)=0.",
                 "  A consulta continua usando P(A), P(B) e P(A e B) como evidencias do PL.",
             ]
         )
     else:
         lines.extend(
             [
-                "  Status: liberada pela extracao de regras.",
+                "  Status: liberada para a consulta atual.",
                 f"  suporte={released_rule['support']:.3f}, confianca={released_rule['confidence']:.3f}, lift={released_rule['lift']:.3f}",
                 "  A confianca liberada vira restricao linear ativa.",
             ]
@@ -984,7 +1002,7 @@ def conclusion_text(
         )
 
     return (
-        f"Para a regra liberada {base_label} -> {target_label}, a ferramenta de extracao "
+        f"Para a regra liberada {base_label} -> {target_label}, a consulta atual "
         f"retornou confianca {confidence:.3f}, considerada {confidence_label}, suporte "
         f"{support:.3f} e lift {lift:.3f}. Na base, foram encontrados {count_both} "
         f"casos favoraveis dentro de {count_base} casos que satisfazem B. "
@@ -1030,17 +1048,26 @@ def classification_metrics(
 
 @app.get("/")
 def home():
-    return send_from_directory(ROOT, "index.html")
+    response = send_from_directory(ROOT, "index.html")
+    response.cache_control.no_cache = True
+    response.cache_control.max_age = 0
+    return response
 
 
 @app.get("/styles.css")
 def styles():
-    return send_from_directory(ROOT, "styles.css")
+    response = send_from_directory(ROOT, "styles.css")
+    response.cache_control.no_cache = True
+    response.cache_control.max_age = 0
+    return response
 
 
 @app.get("/script.js")
 def scripts():
-    return send_from_directory(ROOT, "script.js")
+    response = send_from_directory(ROOT, "script.js")
+    response.cache_control.no_cache = True
+    response.cache_control.max_age = 0
+    return response
 
 
 @app.get("/healthz")
@@ -1094,7 +1121,7 @@ def compute_query(
     count_both = probability_count(rows, both)
     count_base = probability_count(rows, base)
     learned_rules = list(learned_association_rules())
-    released_rule = find_released_association_rule(learned_rules, base, [target])
+    released_rule = query_association_rule(rows, base, [target])
     queried_rule = association_rule_payload(released_rule, base, [target])
     rule_support = released_rule["support"] if released_rule else None
     rule_confidence = released_rule["confidence"] if released_rule else None
@@ -1107,8 +1134,8 @@ def compute_query(
         conclusion_text(target, base, rule_support, rule_confidence, rule_lift, p_b, count_base, count_both, lp)
         if released_rule
         else (
-            f"Para a regra {event_key(base)} -> {event_key([target])}, a ferramenta de extracao "
-            "nao liberou uma regra correspondente. Por isso suporte, confianca e lift nao sao "
+            f"Para a regra {event_key(base)} -> {event_key([target])}, nao ha suporte empirico "
+            "positivo para liberar uma regra correspondente. Por isso suporte, confianca e lift nao sao "
             "informados como metricas de regra."
         )
     )

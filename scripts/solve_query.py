@@ -281,6 +281,31 @@ def find_released_association_rule(
     return None
 
 
+def query_association_rule(
+    rows: list[dict[str, str]],
+    antecedent: list[dict[str, str]],
+    consequent: list[dict[str, str]],
+) -> dict[str, Any] | None:
+    p_antecedent = probability(rows, antecedent)
+    p_consequent = probability(rows, consequent)
+    p_both = probability(rows, [*antecedent, *consequent])
+    confidence = p_both / p_antecedent if p_antecedent > 0 else None
+    lift = confidence / p_consequent if confidence is not None and p_consequent > 0 else None
+    if (
+        p_both <= MIN_ASSOCIATION_SUPPORT
+        or confidence is None
+        or confidence <= MIN_ASSOCIATION_CONFIDENCE
+    ):
+        return None
+    return {
+        "antecedent": antecedent,
+        "consequent": consequent,
+        "support": p_both,
+        "confidence": confidence,
+        "lift": lift,
+    }
+
+
 def build_linear_constraints(
     data: dict[str, Any],
     target: dict[str, str],
@@ -344,7 +369,7 @@ def build_linear_constraints(
     add_interval("selected", [target], probability(rows, [target]))
     add_interval("selected", base, probability(rows, base))
     add_interval("selected", both, probability(rows, both))
-    selected_released_rule = find_released_association_rule(learned_rules, base, [target])
+    selected_released_rule = query_association_rule(rows, base, [target])
     if selected_released_rule is not None:
         add_released_confidence_rule(selected_released_rule, "selectedAssociationRule")
     summary["associationRule"] = summary["learnedAssociationRule"] + summary["selectedAssociationRule"]
@@ -464,12 +489,12 @@ def linear_program_text(
         f"  {i_b[0]:.3f} <= P(B) = {denominator} <= {i_b[1]:.3f}",
         f"  {i_ab[0]:.3f} <= P(A e B) = {numerator} <= {i_ab[1]:.3f}",
         "  O LP completo tambem inclui marginais de cada valor e conjuntas por pares de valores.",
-        "  Observacao: P(A e B) e evidencia empirica do PL; nao e exibido como suporte da regra se a extracao nao liberar B -> A.",
+        "  Observacao: P(A e B) tambem e usado como suporte quando a regra B -> A da consulta e liberada.",
         "",
         "5. Regras de associacao:",
-        "  O minerador gera regras R -> S e retorna suporte, confianca e lift.",
-        "  O PL consome esses valores quando a regra foi liberada pela extracao.",
-        "  Se B -> A nao foi liberada, suporte, confianca e lift da consulta ficam sem valor.",
+        "  O sistema minera regras globais R -> S e tambem calcula a regra B -> A da consulta atual.",
+        "  O PL consome esses valores quando a regra tem suporte e confianca positivos.",
+        "  Se B -> A nao tiver suporte empirico, suporte, confianca e lift da consulta ficam sem valor.",
         "",
         "6. Classificacao:",
         "  Quando a base possui atributo de classe, a consulta pode ser avaliada como classificador binario.",
@@ -553,7 +578,7 @@ def conclusion_text(
         )
 
     return (
-        f"Para a regra liberada {base_label} -> {target_label}, a ferramenta de extracao "
+        f"Para a regra liberada {base_label} -> {target_label}, a consulta atual "
         f"retornou confianca {confidence:.3f}, considerada {confidence_label}, suporte "
         f"{support:.3f} e lift {lift:.3f}. Na base, foram encontrados {count_both} "
         f"casos favoraveis dentro de {count_base} casos que satisfazem B. "
@@ -579,7 +604,7 @@ def compute_query(
     count_both = probability_count(rows, both)
     count_base = probability_count(rows, conditions)
     learned_rules = mine_association_rules(rows, data["domains"])
-    released_rule = find_released_association_rule(learned_rules, conditions, [target])
+    released_rule = query_association_rule(rows, conditions, [target])
     rule_support = released_rule["support"] if released_rule else None
     rule_confidence = released_rule["confidence"] if released_rule else None
     rule_lift = released_rule["lift"] if released_rule else None
@@ -611,8 +636,8 @@ def compute_query(
             conclusion_text(target, conditions, rule_support, rule_confidence, rule_lift, p_b, count_base, count_both, lp)
             if released_rule
             else (
-                f"Para a regra {event_key(conditions)} -> {event_key([target])}, a ferramenta de extracao "
-                "nao liberou uma regra correspondente. Por isso suporte, confianca e lift nao sao "
+                f"Para a regra {event_key(conditions)} -> {event_key([target])}, nao ha suporte empirico "
+                "positivo para liberar uma regra correspondente. Por isso suporte, confianca e lift nao sao "
                 "informados como metricas de regra."
             )
         ),
