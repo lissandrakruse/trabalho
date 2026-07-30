@@ -10,6 +10,12 @@ from pathlib import Path
 from typing import Any
 
 
+# SOLVER SEPARADO DO EXERCICIO
+#
+# Este script replica a formulacao do backend principal sem depender da
+# interface Flask. Ele serve para demonstrar que a consulta P(A | B) e o mesmo
+# programa linear podem ser resolvidos por um modulo independente, comparando
+# valores e tempo entre metodos do HiGHS.
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DATASET = ROOT / "data" / "Crop_recommendation.csv"
 MIN_ASSOCIATION_SUPPORT = 1e-12
@@ -70,6 +76,8 @@ def category_for(attribute: str, value: str, thresholds: dict[str, dict[str, flo
 
 
 def load_dataset(path: Path) -> dict[str, Any]:
+    # Mesma preparacao do app.py: carrega a base, categoriza valores numericos
+    # e cria mundos possiveis observados para receber variaveis x_w no PL.
     with path.open("r", encoding="utf-8", newline="") as file:
         raw_rows = list(csv.DictReader(file))
     if not raw_rows:
@@ -286,6 +294,9 @@ def query_association_rule(
     antecedent: list[dict[str, str]],
     consequent: list[dict[str, str]],
 ) -> dict[str, Any] | None:
+    # Calcula a regra B -> A da consulta enviada pela linha de comando ou pela
+    # interface. As metricas seguem a interpretacao probabilistica:
+    # suporte=P(B e A), confianca=P(A|B), lift=confianca/P(A).
     p_antecedent = probability(rows, antecedent)
     p_consequent = probability(rows, consequent)
     p_both = probability(rows, [*antecedent, *consequent])
@@ -311,6 +322,8 @@ def build_linear_constraints(
     target: dict[str, str],
     base: list[dict[str, str]],
 ) -> tuple[list[list[float]], list[float], dict[str, int]]:
+    # Monta as mesmas restricoes do projeto principal: marginais, conjuntas por
+    # pares, regras aprendidas globais e evidencias da consulta atual.
     rows = data["rows"]
     worlds = data["worlds"]
     a_ub: list[list[float]] = []
@@ -334,6 +347,7 @@ def build_linear_constraints(
         summary[kind] += 1
 
     def add_released_confidence_rule(rule: dict[str, Any], kind: str = "learnedAssociationRule") -> None:
+        # Reescreve lower <= P(S|R) <= upper como duas desigualdades lineares.
         antecedent = rule["antecedent"]
         consequent = rule["consequent"]
         both = [*antecedent, *consequent]
@@ -384,6 +398,8 @@ def solve_linear_interval(
     solver_method: str = "highs",
     solver_name: str = "SciPy HiGHS",
 ) -> dict[str, Any]:
+    # Resolve dois LPs: um minimiza e outro maximiza P(A | B). A razao e
+    # linearizada por Charnes-Cooper antes da chamada ao scipy.optimize.linprog.
     rows = data["rows"]
     worlds = data["worlds"]
     denominator_probability = probability(rows, base)
@@ -593,6 +609,8 @@ def compute_query(
     solver_method: str = "highs",
     solver_name: str = "SciPy HiGHS",
 ) -> dict[str, Any]:
+    # Ponto de entrada reutilizado pela CLI e pela comparacao do Flask.
+    # Calcula probabilidades, regra da consulta, intervalo linear e tempo.
     started_at = datetime.now(timezone.utc)
     started_perf = time.perf_counter()
     rows = data["rows"]

@@ -25,6 +25,11 @@ const mathModel = document.querySelector("#mathModel");
 const tabButtons = document.querySelectorAll(".tab-button");
 const tabPanels = document.querySelectorAll(".tab-panel");
 
+// FRONTEND DO EXERCICIO
+//
+// Controla a tela: monta os selects de A e B, envia P(A | B) para o Flask,
+// recebe probabilidades/regras/intervalo linear e atualiza cards, explicacoes,
+// PDFs e comparacao com solver separado.
 let domains = {};
 let labels = {};
 let attributes = [];
@@ -97,6 +102,9 @@ function fmtCompare(value) {
 }
 
 function ruleFromResult(result) {
+  // Os cards mostram a regra B -> A da consulta atual. Se o backend mandar a
+  // regra pronta, usamos ela; se mandar apenas P(A), P(A e B) e contagens,
+  // recalculamos suporte, confianca e lift no frontend.
   if (result.releasedAssociationRule) return result.releasedAssociationRule;
 
   const support = Number(result.support ?? result.pAB);
@@ -164,6 +172,8 @@ function intervalText(value) {
 }
 
 function buildPayload() {
+  // Item 1c: transforma a escolha do usuario em uma pergunta condicional.
+  // target = evento A; conditions = evento B.
   const target = {
     attribute: targetAttribute.value,
     value: targetValue.value,
@@ -335,6 +345,8 @@ function renderMathModel(result) {
 }
 
 async function runQuery() {
+  // Botao "Consultar": envia A e B para /api/query e renderiza cards,
+  // explicacao probabilistica, acuracia e formulacao matematica.
   runQueryButton.disabled = true;
   runQueryButton.textContent = "Resolvendo...";
   downloadReportLink.classList.add("is-hidden");
@@ -445,6 +457,8 @@ async function runQuery() {
 }
 
 async function generateReport() {
+  // Botao "Gerar PDF": usa a mesma consulta escolhida na tela para criar o
+  // relatorio da consulta atual no backend.
   generateReportButton.disabled = true;
   generateReportButton.textContent = "Gerando...";
   const payload = buildPayload();
@@ -474,6 +488,8 @@ async function generateReport() {
 }
 
 async function generateSolverReport() {
+  // Botao "Resolver e Gerar Relatorio": roda a comparacao com o solver
+  // separado e abre o PDF comparativo.
   generateSolverReportButton.disabled = true;
   generateSolverReportButton.textContent = "Gerando comparativo...";
   solverCompareStatus.textContent = "Resolvendo solver e gerando relatorio";
@@ -510,6 +526,8 @@ async function generateSolverReport() {
 }
 
 async function compareSolver() {
+  // Botao "Resolver Solver Separado": compara o resultado principal com o
+  // script independente scripts/solve_query.py sem gerar PDF.
   compareSolverButton.disabled = true;
   compareSolverButton.textContent = "Resolvendo...";
   solverCompareStatus.textContent = "Executando solver";
@@ -534,6 +552,8 @@ async function compareSolver() {
 }
 
 async function generateFullLinearProgram(downloadAfter = false) {
+  // Gera o TXT completo com evidencias empiricas, restricoes, regras,
+  // Charnes-Cooper e objetivos do programa linear.
   generateFullLinearProgramButton.disabled = true;
   generateFullLinearProgramButton.textContent = "Gerando LP...";
   downloadFullLinearProgramLink.classList.add("is-disabled");

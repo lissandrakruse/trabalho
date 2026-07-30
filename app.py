@@ -12,6 +12,17 @@ from typing import Any
 from flask import Flask, jsonify, request, send_from_directory
 
 
+# MAPA DO EXERCICIO
+#
+# Este arquivo e o backend principal do trabalho. Ele implementa o roteiro passado
+# no quadro:
+# 1. carrega a base e transforma atributos numericos em categorias;
+# 2. extrai conhecimento probabilistico: marginais, conjuntas, regras de
+#    associacao e metricas de classificacao;
+# 3. escreve essas probabilidades como restricoes de um programa linear;
+# 4. recebe da interface uma pergunta P(A | B), escolhida pelo usuario;
+# 5. transforma a razao P(A e B) / P(B) por Charnes-Cooper e resolve com HiGHS;
+# 6. gera textos, PDFs e comparacao com o solver separado.
 ROOT = Path(__file__).resolve().parent
 DATASET_PATH = ROOT / "data" / "Crop_recommendation.csv"
 GENERATED_REPORT_DIR = ROOT / "reports" / "generated"
@@ -24,6 +35,9 @@ MIN_LEARNED_RULE_SUPPORT = 0.01
 MIN_LEARNED_RULE_CONFIDENCE = 0.2
 MIN_LEARNED_RULE_LIFT = 1.05
 MAX_LEARNED_ASSOCIATION_RULES = 3
+
+# Solvers realmente executados na comparacao. Todos usam scipy.optimize.linprog,
+# variando o metodo do HiGHS para medir consistencia e tempo.
 SOLVER_ENGINES = [
     {
         "id": "highs",
@@ -165,6 +179,11 @@ def normalize_base_conditions(
 
 @lru_cache(maxsize=1)
 def load_dataset() -> dict[str, Any]:
+    # Item 1a do exercicio: preparar a base categorica.
+    # A base original tem atributos numericos de solo/clima. Para permitir
+    # perguntas logicas do tipo "N=alto" e "ph=alcalino", cada valor numerico
+    # e convertido para uma faixa categorica. O resultado e guardado em cache
+    # porque as consultas usam sempre a mesma base.
     with DATASET_PATH.open("r", encoding="utf-8", newline="") as file:
         raw_rows = list(csv.DictReader(file))
     if not raw_rows:
@@ -180,6 +199,9 @@ def load_dataset() -> dict[str, Any]:
 
     thresholds = {}
     for attribute in numeric_attributes:
+        # Para atributos numericos gerais, os tercis dividem os valores em
+        # baixo, medio e alto. O pH usa uma regra propria por ter interpretacao
+        # quimica natural: acido, neutro e alcalino.
         values = [float(row[attribute]) for row in raw_rows]
         thresholds[attribute] = {
             "low": quantile(values, 1 / 3),
@@ -204,6 +226,8 @@ def load_dataset() -> dict[str, Any]:
     for row in categorical_rows:
         key = tuple(row[attribute] for attribute in attributes)
         world_counts[key] = world_counts.get(key, 0) + 1
+    # Cada combinacao categorica observada vira um "mundo possivel" w.
+    # No programa linear, cada mundo recebe uma variavel x_w.
     worlds = [
         {"values": dict(zip(attributes, key)), "count": count}
         for key, count in world_counts.items()
@@ -227,6 +251,8 @@ def matches(row: dict[str, str], conditions: list[dict[str, str]]) -> bool:
 
 
 def probability(rows: list[dict[str, str]], conditions: list[dict[str, str]]) -> float:
+    # Frequencia empirica usada como probabilidade: P(condicoes) =
+    # quantidade de linhas que satisfazem as condicoes / total de linhas.
     if not conditions:
         return 1.0
     return sum(1 for row in rows if matches(row, conditions)) / len(rows)
@@ -239,6 +265,9 @@ def probability_count(rows: list[dict[str, str]], conditions: list[dict[str, str
 
 
 def rounded_interval(value: float, width: float = 0.001) -> tuple[float, float]:
+    # Item 1a: trabalhar com intervalos evita que arredondamentos e ponto
+    # flutuante deixem o PL artificialmente inviavel. Ex.: 0.976 vira uma faixa
+    # pequena em torno do valor arredondado.
     rounded = round(value, 3)
     return max(0.0, rounded - width), min(1.0, rounded + width)
 
@@ -259,6 +288,8 @@ def fmt_probability(value: float | None) -> str:
 
 
 def world_mask(worlds: list[dict[str, Any]], conditions: list[dict[str, str]]) -> list[float]:
+    # Vetor indicador do evento. Se o mundo w satisfaz as condicoes, a posicao
+    # vale 1; caso contrario, 0. Assim soma(mask[w] * x_w) representa P(evento).
     return [1.0 if matches(world["values"], conditions) else 0.0 for world in worlds]
 
 
@@ -297,6 +328,10 @@ def association_rule_status(
     antecedent: list[dict[str, str]],
     consequent: list[dict[str, str]],
 ) -> dict[str, Any]:
+    # Regra R -> S:
+    # suporte = P(R e S)
+    # confianca/precisao = P(S | R) = P(R e S) / P(R)
+    # lift = confianca / P(S)
     p_antecedent = probability(rows, antecedent)
     p_consequent = probability(rows, consequent)
     p_both = probability(rows, [*antecedent, *consequent])
@@ -335,6 +370,10 @@ def mine_association_rules(
     domains: dict[str, list[str]],
     max_rules: int = MAX_LEARNED_ASSOCIATION_RULES,
 ) -> list[dict[str, Any]]:
+    # Extracao de conhecimento probabilistico via regras de associacao.
+    # Aqui mineramos regras simples valor_de_atributo -> valor_de_outro_atributo
+    # e mantemos as melhores por lift, confianca e suporte. Elas entram no PL
+    # como conhecimento aprendido independente da consulta escolhida.
     attributes = list(domains.keys())
     total = len(rows)
     single_counts: dict[tuple[str, str], int] = {}
@@ -457,6 +496,10 @@ def query_association_rule(
     antecedent: list[dict[str, str]],
     consequent: list[dict[str, str]],
 ) -> dict[str, Any] | None:
+    # A regra da pergunta do usuario tambem e calculada:
+    # B -> A, onde A e o evento alvo e B e o conjunto de afirmacoes.
+    # Isso libera os cards da interface mesmo quando B -> A nao esta entre as
+    # regras globais top-N incorporadas ao PL.
     status = association_rule_status(rows, antecedent, consequent)
     if not status["accepted"]:
         return None
@@ -480,6 +523,11 @@ def build_linear_constraints(
     target: dict[str, str],
     base: list[dict[str, str]],
 ) -> tuple[list[list[float]], list[float], list[dict[str, Any]]]:
+    # Item 1b: converter probabilidades empiricas em restricoes lineares.
+    # A variavel do PL e x_w, a massa de probabilidade de cada mundo possivel.
+    # Para cada evento E, criamos:
+    #   lower <= soma(x_w onde E) <= upper
+    # usando intervalos em torno das frequencias observadas na base.
     a_ub: list[list[float]] = []
     b_ub: list[float] = []
     records: list[dict[str, Any]] = []
@@ -508,6 +556,11 @@ def build_linear_constraints(
         )
 
     def add_released_confidence_rule(rule: dict[str, Any], kind: str = "learned_association_rule") -> None:
+        # Uma regra R -> S com confianca c vira restricao linear:
+        #   lower <= P(R e S) / P(R) <= upper
+        # que e reescrita como:
+        #   P(R e S) - upper.P(R) <= 0
+        #  -P(R e S) + lower.P(R) <= 0
         antecedent = rule["antecedent"]
         consequent = rule["consequent"]
         both = [*antecedent, *consequent]
@@ -539,6 +592,8 @@ def build_linear_constraints(
 
     for attribute in attributes:
         for value in domains[attribute]:
+            # Probabilidades marginais de cada valor de cada variavel:
+            # P(N=alto), P(label=banana), P(ph=alcalino), etc.
             conditions = [{"attribute": attribute, "value": value}]
             add_interval("marginal", conditions, probability(rows, conditions))
 
@@ -546,6 +601,8 @@ def build_linear_constraints(
         for right_attribute in attributes[index + 1 :]:
             for left_value in domains[left_attribute]:
                 for right_value in domains[right_attribute]:
+                    # Probabilidades conjuntas por pares de valores:
+                    # P(N=alto e P=alto), P(label=banana e ph=neutro), etc.
                     conditions = [
                         {"attribute": left_attribute, "value": left_value},
                         {"attribute": right_attribute, "value": right_value},
@@ -557,6 +614,9 @@ def build_linear_constraints(
         add_released_confidence_rule(rule)
 
     both = [*base, target]
+    # Evidencias especificas da pergunta: P(A), P(B) e P(A e B).
+    # Elas garantem que a consulta P(A | B) seja ancorada no que a base
+    # realmente observou.
     add_interval("selected_target", [target], probability(rows, [target]))
     add_interval("selected_base", base, probability(rows, base))
     add_interval("selected_joint", both, probability(rows, both))
@@ -575,6 +635,9 @@ def solve_linear_interval(
     solver_method: str = "highs",
     solver_name: str = "SciPy HiGHS",
 ) -> dict[str, Any]:
+    # Itens 1c, 1d e 1e: resolver a pergunta do usuario.
+    # A interface escolhe A e B; o objetivo matematico e minimizar e maximizar
+    # P(A | B) = P(A e B) / P(B), respeitando todas as restricoes montadas.
     denominator_probability = probability(rows, base)
     denominator_count = probability_count(rows, base)
     if denominator_count == 0 or denominator_probability <= 0:
@@ -622,8 +685,8 @@ def solve_linear_interval(
     denominator_mask = world_mask(worlds, base)
     numerator_mask = world_mask(worlds, both)
 
-    # Charnes-Cooper: x = y / t. The conditional objective becomes linear
-    # because P(B) is fixed as denominator_mask . y = 1.
+    # Charnes-Cooper: x = y / t. A razao condicional vira um objetivo linear
+    # porque fixamos P(B) em y como denominator_mask . y = 1.
     transformed_a_ub = []
     transformed_b_ub = []
     for row, limit in zip(a_ub, b_ub):
@@ -1016,6 +1079,9 @@ def classification_metrics(
     count_ab: int,
     total: int,
 ) -> dict[str, Any]:
+    # Se a base tem variavel de classe, a regra B -> A pode ser avaliada como
+    # classificador binario: quando B ocorre, prediz A; quando B nao ocorre,
+    # prediz nao A. Da matriz VP/FP/FN/VN saem acuracia, precisao, recall e F1.
     true_positive = count_ab
     false_positive = count_b - count_ab
     false_negative = count_a - count_ab
@@ -1103,6 +1169,9 @@ def compute_query(
     solver_method: str = "highs",
     solver_name: str = "SciPy HiGHS",
 ) -> dict[str, Any]:
+    # Ponto central chamado pelo botao "Consultar".
+    # Ele valida A e B, calcula probabilidades empiricas, minera/seleciona
+    # regras, resolve o PL e devolve tudo que o frontend exibe.
     started_at = datetime.now(timezone.utc)
     started_perf = time.perf_counter()
     data = load_dataset()
@@ -1117,6 +1186,8 @@ def compute_query(
     p_a = probability(rows, [target])
     p_b = probability(rows, base)
     p_ab = probability(rows, both)
+    # Estes tres valores sao exatamente as evidencias da pergunta:
+    # P(A), P(B) e P(A e B). O intervalo do solver fica sobre P(A | B).
     count_a = probability_count(rows, [target])
     count_both = probability_count(rows, both)
     count_base = probability_count(rows, base)
