@@ -4,6 +4,7 @@ import argparse
 import csv
 import json
 import math
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -17,13 +18,15 @@ from typing import Any
 # programa linear podem ser resolvidos por um modulo independente, comparando
 # valores e tempo entre metodos do HiGHS.
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from apriori_rules import mine_apriori_rules
+
 DEFAULT_DATASET = ROOT / "data" / "Crop_recommendation.csv"
-MIN_ASSOCIATION_SUPPORT = 1e-12
-MIN_ASSOCIATION_CONFIDENCE = 1e-12
-MIN_LEARNED_RULE_SUPPORT = 0.01
-MIN_LEARNED_RULE_CONFIDENCE = 0.2
-MIN_LEARNED_RULE_LIFT = 1.05
-MAX_LEARNED_ASSOCIATION_RULES = 3
+APRIORI_MIN_SUPPORT = 0.01
+APRIORI_MIN_CONFIDENCE = 0.0
+APRIORI_MAX_ITEMSET_SIZE = 3
 SOLVER_ENGINES = [
     {"id": "highs", "name": "SciPy HiGHS", "method": "highs"},
     {"id": "highs-ds", "name": "HiGHS Dual Simplex", "method": "highs-ds"},
@@ -119,6 +122,13 @@ def load_dataset(path: Path) -> dict[str, Any]:
         {"values": dict(zip(attributes, key)), "count": count}
         for key, count in world_counts.items()
     ]
+    apriori = mine_apriori_rules(
+        worlds,
+        len(rows),
+        min_support=APRIORI_MIN_SUPPORT,
+        min_confidence=APRIORI_MIN_CONFIDENCE,
+        max_itemset_size=APRIORI_MAX_ITEMSET_SIZE,
+    )
     return {
         "attributes": attributes,
         "numericAttributes": numeric_attributes,
@@ -128,6 +138,7 @@ def load_dataset(path: Path) -> dict[str, Any]:
         "domains": domains,
         "thresholds": thresholds,
         "total": len(rows),
+        "apriori": apriori,
     }
 
 
@@ -184,8 +195,30 @@ def world_mask(worlds: list[dict[str, Any]], conditions: list[dict[str, str]]) -
     return [1.0 if matches(world["values"], conditions) else 0.0 for world in worlds]
 
 
-def add_vectors(left: list[float], right: list[float], right_scale: float = 1.0) -> list[float]:
-    return [left_item + right_scale * right_item for left_item, right_item in zip(left, right)]
+def sparse_world_mask(
+    worlds: list[dict[str, Any]],
+    conditions: list[dict[str, str]],
+) -> dict[int, float]:
+    return {
+        index: 1.0
+        for index, world in enumerate(worlds)
+        if matches(world["values"], conditions)
+    }
+
+
+def add_sparse_vectors(
+    left: dict[int, float],
+    right: dict[int, float],
+    right_scale: float = 1.0,
+) -> dict[int, float]:
+    result = dict(left)
+    for index, value in right.items():
+        combined = result.get(index, 0.0) + (right_scale * value)
+        if abs(combined) <= 1e-15:
+            result.pop(index, None)
+        else:
+            result[index] = combined
+    return result
 
 
 def rounded_interval(value: float, width: float = 0.001) -> tuple[float, float]:
@@ -219,58 +252,9 @@ def condition_signature(conditions: list[dict[str, str]]) -> tuple[tuple[str, st
 
 
 def mine_association_rules(
-    rows: list[dict[str, str]],
-    domains: dict[str, list[str]],
-    max_rules: int = MAX_LEARNED_ASSOCIATION_RULES,
+    data: dict[str, Any],
 ) -> list[dict[str, Any]]:
-    attributes = list(domains.keys())
-    single_conditions = [
-        [{"attribute": attribute, "value": value}]
-        for attribute in attributes
-        for value in domains[attribute]
-    ]
-    antecedents = [*single_conditions]
-
-    rules: list[dict[str, Any]] = []
-    seen: set[tuple[tuple[tuple[str, str], ...], tuple[tuple[str, str], ...]]] = set()
-    for antecedent in antecedents:
-        antecedent_attributes = {item["attribute"] for item in antecedent}
-        p_antecedent = probability(rows, antecedent)
-        if p_antecedent <= 0:
-            continue
-        for consequent_attribute in attributes:
-            if consequent_attribute in antecedent_attributes:
-                continue
-            for consequent_value in domains[consequent_attribute]:
-                consequent = [{"attribute": consequent_attribute, "value": consequent_value}]
-                signature = (condition_signature(antecedent), condition_signature(consequent))
-                if signature in seen:
-                    continue
-                seen.add(signature)
-                p_consequent = probability(rows, consequent)
-                both = [*antecedent, *consequent]
-                support = probability(rows, both)
-                confidence = support / p_antecedent if p_antecedent > 0 else None
-                lift = confidence / p_consequent if confidence is not None and p_consequent > 0 else None
-                if (
-                    support >= MIN_LEARNED_RULE_SUPPORT
-                    and confidence is not None
-                    and confidence >= MIN_LEARNED_RULE_CONFIDENCE
-                    and lift is not None
-                    and lift >= MIN_LEARNED_RULE_LIFT
-                ):
-                    rules.append(
-                        {
-                            "antecedent": antecedent,
-                            "consequent": consequent,
-                            "support": support,
-                            "confidence": confidence,
-                            "lift": lift,
-                        }
-                    )
-
-    rules.sort(key=lambda item: (item["lift"], item["confidence"], item["support"]), reverse=True)
-    return rules[:max_rules]
+    return list(data["apriori"]["rules"])
 
 
 def find_released_association_rule(
@@ -290,75 +274,63 @@ def find_released_association_rule(
 
 
 def query_association_rule(
-    rows: list[dict[str, str]],
+    rules: list[dict[str, Any]],
     antecedent: list[dict[str, str]],
     consequent: list[dict[str, str]],
 ) -> dict[str, Any] | None:
-    # Calcula a regra B -> A da consulta enviada pela linha de comando ou pela
-    # interface. As metricas seguem a interpretacao probabilistica:
-    # suporte=P(B e A), confianca=P(A|B), lift=confianca/P(A).
-    p_antecedent = probability(rows, antecedent)
-    p_consequent = probability(rows, consequent)
-    p_both = probability(rows, [*antecedent, *consequent])
-    confidence = p_both / p_antecedent if p_antecedent > 0 else None
-    lift = confidence / p_consequent if confidence is not None and p_consequent > 0 else None
-    if (
-        p_both <= MIN_ASSOCIATION_SUPPORT
-        or confidence is None
-        or confidence <= MIN_ASSOCIATION_CONFIDENCE
-    ):
-        return None
-    return {
-        "antecedent": antecedent,
-        "consequent": consequent,
-        "support": p_both,
-        "confidence": confidence,
-        "lift": lift,
-    }
+    return find_released_association_rule(rules, antecedent, consequent)
 
 
 def build_linear_constraints(
     data: dict[str, Any],
     target: dict[str, str],
     base: list[dict[str, str]],
-) -> tuple[list[list[float]], list[float], dict[str, int]]:
+) -> tuple[list[dict[int, float]], list[float], dict[str, int]]:
     # Monta as mesmas restricoes do projeto principal: marginais, conjuntas por
-    # pares, regras aprendidas globais e evidencias da consulta atual.
+    # pares e todas as regras globais geradas pelo Apriori.
     rows = data["rows"]
     worlds = data["worlds"]
-    a_ub: list[list[float]] = []
+    a_ub: list[dict[int, float]] = []
     b_ub: list[float] = []
     summary = {
         "marginal": 0,
         "pairwiseJoint": 0,
-        "learnedAssociationRule": 0,
-        "selectedAssociationRule": 0,
-        "associationRule": 0,
-        "selected": 0,
+        "aprioriRuleSupport": 0,
+        "aprioriRuleConfidence": 0,
+        "aprioriRules": 0,
     }
+    interval_events: set[tuple[tuple[str, str], ...]] = set()
 
-    def add_interval(kind: str, conditions: list[dict[str, str]], value: float) -> None:
+    def add_interval(kind: str, conditions: list[dict[str, str]], value: float) -> bool:
+        signature = condition_signature(conditions)
+        if signature in interval_events:
+            return False
+        interval_events.add(signature)
         lower, upper = rounded_interval(value)
-        mask = world_mask(worlds, conditions)
+        mask = sparse_world_mask(worlds, conditions)
         a_ub.append(mask)
         b_ub.append(upper)
-        a_ub.append([-item for item in mask])
+        a_ub.append({index: -value for index, value in mask.items()})
         b_ub.append(-lower)
         summary[kind] += 1
+        return True
 
-    def add_released_confidence_rule(rule: dict[str, Any], kind: str = "learnedAssociationRule") -> None:
-        # Reescreve lower <= P(S|R) <= upper como duas desigualdades lineares.
+    def add_apriori_rule(rule: dict[str, Any]) -> None:
+        # Suporte ancora P(R e S). Confianca vira duas desigualdades lineares.
+        # Lift e apenas descritivo e nao participa da formulacao.
         antecedent = rule["antecedent"]
         consequent = rule["consequent"]
         both = [*antecedent, *consequent]
+        add_interval("aprioriRuleSupport", both, rule["support"])
         lower, upper = rounded_interval(rule["confidence"])
-        antecedent_mask = world_mask(worlds, antecedent)
-        both_mask = world_mask(worlds, both)
-        a_ub.append(add_vectors(both_mask, antecedent_mask, -upper))
+        antecedent_mask = sparse_world_mask(worlds, antecedent)
+        both_mask = sparse_world_mask(worlds, both)
+        a_ub.append(add_sparse_vectors(both_mask, antecedent_mask, -upper))
         b_ub.append(0.0)
-        a_ub.append(add_vectors([-item for item in both_mask], antecedent_mask, lower))
+        negative_both = {index: -value for index, value in both_mask.items()}
+        a_ub.append(add_sparse_vectors(negative_both, antecedent_mask, lower))
         b_ub.append(0.0)
-        summary[kind] += 1
+        summary["aprioriRuleConfidence"] += 1
 
     for attribute in data["attributes"]:
         for value in data["domains"][attribute]:
@@ -375,18 +347,10 @@ def build_linear_constraints(
                     ]
                     add_interval("pairwiseJoint", conditions, probability(rows, conditions))
 
-    learned_rules = mine_association_rules(rows, data["domains"])
+    learned_rules = mine_association_rules(data)
     for rule in learned_rules:
-        add_released_confidence_rule(rule)
-
-    both = [*base, target]
-    add_interval("selected", [target], probability(rows, [target]))
-    add_interval("selected", base, probability(rows, base))
-    add_interval("selected", both, probability(rows, both))
-    selected_released_rule = query_association_rule(rows, base, [target])
-    if selected_released_rule is not None:
-        add_released_confidence_rule(selected_released_rule, "selectedAssociationRule")
-    summary["associationRule"] = summary["learnedAssociationRule"] + summary["selectedAssociationRule"]
+        add_apriori_rule(rule)
+    summary["aprioriRules"] = len(learned_rules)
 
     return a_ub, b_ub, summary
 
@@ -418,6 +382,7 @@ def solve_linear_interval(
 
     try:
         from scipy.optimize import linprog
+        from scipy.sparse import coo_matrix, csr_matrix, hstack
     except Exception as error:
         return {"ok": False, "error": f"scipy indisponivel: {error}"}
 
@@ -430,12 +395,29 @@ def solve_linear_interval(
     numerator_mask = world_mask(worlds, both)
 
     # Charnes-Cooper transforma P(A e B) / P(B) em objetivos lineares.
-    transformed_a_ub = [[*row, -limit] for row, limit in zip(a_ub, b_ub)]
-    transformed_b_ub = [0.0 for _ in transformed_a_ub]
-    transformed_a_eq = [
-        [*([1.0] * n), -1.0],
-        [*denominator_mask, 0.0],
-    ]
+    sparse_values: list[float] = []
+    sparse_rows: list[int] = []
+    sparse_columns: list[int] = []
+    for row_index, row in enumerate(a_ub):
+        for column_index, value in row.items():
+            sparse_rows.append(row_index)
+            sparse_columns.append(column_index)
+            sparse_values.append(value)
+    base_matrix = coo_matrix(
+        (sparse_values, (sparse_rows, sparse_columns)),
+        shape=(len(a_ub), n),
+    ).tocsr()
+    transformed_a_ub = hstack(
+        [base_matrix, csr_matrix([[-limit] for limit in b_ub])],
+        format="csr",
+    )
+    transformed_b_ub = [0.0] * len(a_ub)
+    transformed_a_eq = csr_matrix(
+        [
+            [*([1.0] * n), -1.0],
+            [*denominator_mask, 0.0],
+        ]
+    )
     transformed_b_eq = [0.0, 1.0]
     transformed_bounds = [(0.0, None)] * (n + 1)
 
@@ -463,7 +445,7 @@ def solve_linear_interval(
         "lower": clean_probability(float(lower_result.fun)),
         "upper": clean_probability(float(-upper_result.fun)),
         "variables": n,
-        "constraints": len(transformed_a_ub) + len(transformed_a_eq),
+        "constraints": transformed_a_ub.shape[0] + transformed_a_eq.shape[0],
         "baseConstraints": len(a_ub),
         "constraintSummary": summary,
         "solver": f"scipy.optimize.linprog {solver_method}",
@@ -480,9 +462,6 @@ def linear_program_text(
     p_ab: float,
     lp: dict[str, Any],
 ) -> str:
-    i_a = rounded_interval(p_a)
-    i_b = rounded_interval(p_b)
-    i_ab = rounded_interval(p_ab)
     numerator = f"soma(x_w onde {event_key([*base, target])})"
     denominator = f"soma(x_w onde {event_key(base)})"
     lines = [
@@ -500,22 +479,20 @@ def linear_program_text(
         "3. Normalizacao probabilistica:",
         "  soma(x_w) = 1",
         "",
-        "4. Evidencias empiricas usadas como restricoes intervalares:",
-        f"  {i_a[0]:.3f} <= P(A) = soma(x_w onde {event_key([target])}) <= {i_a[1]:.3f}",
-        f"  {i_b[0]:.3f} <= P(B) = {denominator} <= {i_b[1]:.3f}",
-        f"  {i_ab[0]:.3f} <= P(A e B) = {numerator} <= {i_ab[1]:.3f}",
-        "  O LP completo tambem inclui marginais de cada valor e conjuntas por pares de valores.",
-        "  Observacao: P(A e B) tambem e usado como suporte quando a regra B -> A da consulta e liberada.",
+        "4. Evidencias globais usadas como restricoes intervalares:",
+        "  O LP inclui marginais de cada valor e conjuntas por pares de valores.",
+        f"  P(A) empirico para auditoria = {p_a:.3f}",
+        f"  P(B) empirico para auditoria = {p_b:.3f}",
+        f"  P(A e B) empirico para auditoria = {p_ab:.3f}",
+        "  A consulta nao injeta P(A e B) como resposta pronta no LP.",
         "",
-        "5. Regras de associacao:",
-        "  O sistema minera regras globais R -> S e tambem calcula a regra B -> A da consulta atual.",
-        "  O PL consome esses valores quando a regra tem suporte e confianca positivos.",
-        "  Se B -> A nao tiver suporte empirico, suporte, confianca e lift da consulta ficam sem valor.",
+        "5. Mineracao Apriori e regras lineares:",
+        "  O Apriori recebe os mundos observados de Omega como transacoes ponderadas.",
+        "  Suporte ancora P(R e S) e confianca ancora P(R e S) = confianca.P(R).",
+        "  Confianca e lift nao filtram regras como se fossem medidas de qualidade.",
         "",
-        "6. Classificacao:",
-        "  Quando a base possui atributo de classe, a consulta pode ser avaliada como classificador binario.",
-        "  A tela mostra acuracia, precisao, recall e F1 para a regra B -> A.",
-        "  Uma extensao natural e listar P(c | x) para cada classe c e cada valor x dos atributos.",
+        "6. Papel do lift:",
+        "  Lift e apenas descritivo: nao mede acuracia e nao entra no LP.",
         "",
         "7. Consulta condicional:",
         "  P(A | B) = P(A e B) / P(B)",
@@ -571,21 +548,6 @@ def conclusion_text(
             "e que essa combinacao nao tem evidencia empirica na base."
         )
 
-    confidence_label = "baixa"
-    if confidence is not None and confidence >= 0.7:
-        confidence_label = "alta"
-    elif confidence is not None and confidence >= 0.3:
-        confidence_label = "moderada"
-
-    if lift is None:
-        lift_sentence = "O lift nao foi calculado."
-    elif lift > 1.2:
-        lift_sentence = f"O lift de {lift:.3f} indica associacao positiva."
-    elif lift < 0.8:
-        lift_sentence = f"O lift de {lift:.3f} indica associacao negativa."
-    else:
-        lift_sentence = f"O lift de {lift:.3f} indica associacao fraca ou proxima da independencia."
-
     interval_sentence = ""
     if lp.get("ok"):
         interval_sentence = (
@@ -594,11 +556,11 @@ def conclusion_text(
         )
 
     return (
-        f"Para a regra liberada {base_label} -> {target_label}, a consulta atual "
-        f"retornou confianca {confidence:.3f}, considerada {confidence_label}, suporte "
-        f"{support:.3f} e lift {lift:.3f}. Na base, foram encontrados {count_both} "
-        f"casos favoraveis dentro de {count_base} casos que satisfazem B. "
-        f"{lift_sentence}{interval_sentence}"
+        f"O Apriori gerou a regra {base_label} -> {target_label} com suporte "
+        f"{support:.3f} e confianca {confidence:.3f}; ambos alimentam restricoes "
+        f"probabilisticas. O lift {lift:.3f} e apenas descritivo e nao mede acuracia. "
+        f"Na base, existem {count_both} ocorrencias conjuntas em {count_base} casos de B."
+        f"{interval_sentence}"
     )
 
 
@@ -621,8 +583,8 @@ def compute_query(
     p_ab = probability(rows, both)
     count_both = probability_count(rows, both)
     count_base = probability_count(rows, conditions)
-    learned_rules = mine_association_rules(rows, data["domains"])
-    released_rule = query_association_rule(rows, conditions, [target])
+    learned_rules = mine_association_rules(data)
+    released_rule = query_association_rule(learned_rules, conditions, [target])
     rule_support = released_rule["support"] if released_rule else None
     rule_confidence = released_rule["confidence"] if released_rule else None
     rule_lift = released_rule["lift"] if released_rule else None
@@ -648,15 +610,20 @@ def compute_query(
         "countBoth": count_both,
         "countBase": count_base,
         "total": data["total"],
+        "aprioriMining": {
+            key: value
+            for key, value in data["apriori"].items()
+            if key != "rules"
+        },
         "linear": lp,
         "linearProgram": linear_program_text(target, conditions, p_a, p_b, p_ab, lp),
         "conclusion": (
             conclusion_text(target, conditions, rule_support, rule_confidence, rule_lift, p_b, count_base, count_both, lp)
             if released_rule
             else (
-                f"Para a regra {event_key(conditions)} -> {event_key([target])}, nao ha suporte empirico "
-                "positivo para liberar uma regra correspondente. Por isso suporte, confianca e lift nao sao "
-                "informados como metricas de regra."
+                f"A consulta {event_key(conditions)} -> {event_key([target])} nao foi gerada pelo Apriori. "
+                "As medidas de regra ficam vazias, mas o intervalo continua sendo inferido pelas "
+                "restricoes globais."
             )
         ),
     }

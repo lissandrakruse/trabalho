@@ -12,7 +12,7 @@
         <header class="topbar">
           <div>
             <h1>Probabilidades do Solo</h1>
-            <p>Consulta categórica, regras de associação liberadas pela extração e programação linear sobre o dataset treinado.</p>
+            <p>Mundos possíveis Ω, regras de associação geradas pelo Apriori e programação linear probabilística.</p>
           </div>
           <div class="dataset-status" id="datasetStatus">Carregando dataset...</div>
         </header>
@@ -78,13 +78,6 @@
 
         <section class="panel">
           <div class="panel-head">
-            <h2>Acur&aacute;cia do Modelo Probabil&iacute;stico</h2>
-          </div>
-          <div class="classification-grid" id="classificationMetrics"></div>
-        </section>
-
-        <section class="panel">
-          <div class="panel-head">
             <h2>Compara&ccedil;&atilde;o com Solver Separado</h2>
             <span id="solverCompareStatus">Aguardando execu&ccedil;&atilde;o</span>
           </div>
@@ -115,7 +108,7 @@
           </div>
           <div class="tab-panel is-active" id="linearPanel" role="tabpanel" aria-labelledby="linearTab">
             <div class="formulation-note">
-              Este painel mostra o resumo do programa linear da consulta. Clique em <strong>Gerar e baixar LP em TXT</strong> para criar o arquivo completo, incluindo evid&ecirc;ncias emp&iacute;ricas, regras liberadas pela extra&ccedil;&atilde;o, transforma&ccedil;&atilde;o de Charnes-Cooper e objetivos do solver.
+              Este painel mostra o resumo do programa linear da consulta. Clique em <strong>Gerar e baixar LP em TXT</strong> para criar o arquivo completo, incluindo Ω, marginais, conjuntas por pares, regras Apriori convertidas em restri&ccedil;&otilde;es, transforma&ccedil;&atilde;o de Charnes-Cooper e objetivos do solver.
             </div>
             <pre class="lp-box" id="linearProgram"></pre>
           </div>
@@ -126,6 +119,6 @@
       </section>
     </main>
 
-    <script src="script.js?v=20260730-cards-fix"></script>
+    <script src="script.js?v=20260827-apriori-lp"></script>
   </body>
 </html>

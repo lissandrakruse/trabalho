@@ -11,15 +11,16 @@ from typing import Any
 
 from flask import Flask, jsonify, request, send_from_directory
 
+from apriori_rules import mine_apriori_rules
+
 
 # MAPA DO EXERCICIO
 #
 # Este arquivo e o backend principal do trabalho. Ele implementa o roteiro passado
 # no quadro:
 # 1. carrega a base e transforma atributos numericos em categorias;
-# 2. extrai conhecimento probabilistico: marginais, conjuntas, regras de
-#    associacao e metricas de classificacao;
-# 3. escreve essas probabilidades como restricoes de um programa linear;
+# 2. forma Ω com os mundos observados e minera itemsets/regras com Apriori;
+# 3. escreve marginais, conjuntas e regras Apriori como restricoes lineares;
 # 4. recebe da interface uma pergunta P(A | B), escolhida pelo usuario;
 # 5. transforma a razao P(A e B) / P(B) por Charnes-Cooper e resolve com HiGHS;
 # 6. gera textos, PDFs e comparacao com o solver separado.
@@ -29,12 +30,10 @@ GENERATED_REPORT_DIR = ROOT / "reports" / "generated"
 QUERY_REPORT_PATH = GENERATED_REPORT_DIR / "relatorio_consulta_atual.pdf"
 SOLVER_COMPARISON_REPORT_PATH = GENERATED_REPORT_DIR / "relatorio_comparacao_solver.pdf"
 FULL_LINEAR_PROGRAM_PATH = GENERATED_REPORT_DIR / "programa_linear_completo.txt"
-MIN_ASSOCIATION_SUPPORT = 1e-12
-MIN_ASSOCIATION_CONFIDENCE = 1e-12
-MIN_LEARNED_RULE_SUPPORT = 0.01
-MIN_LEARNED_RULE_CONFIDENCE = 0.2
-MIN_LEARNED_RULE_LIFT = 1.05
-MAX_LEARNED_ASSOCIATION_RULES = 3
+APRIORI_MIN_SUPPORT = 0.01
+APRIORI_MIN_CONFIDENCE = 0.0
+APRIORI_MAX_ITEMSET_SIZE = 3
+APRIORI_RULE_PREVIEW_LIMIT = 50
 
 # Solvers realmente executados na comparacao. Todos usam scipy.optimize.linprog,
 # variando o metodo do HiGHS para medir consistencia e tempo.
@@ -293,6 +292,32 @@ def world_mask(worlds: list[dict[str, Any]], conditions: list[dict[str, str]]) -
     return [1.0 if matches(world["values"], conditions) else 0.0 for world in worlds]
 
 
+def sparse_world_mask(
+    worlds: list[dict[str, Any]],
+    conditions: list[dict[str, str]],
+) -> dict[int, float]:
+    return {
+        index: 1.0
+        for index, world in enumerate(worlds)
+        if matches(world["values"], conditions)
+    }
+
+
+def add_sparse_vectors(
+    left: dict[int, float],
+    right: dict[int, float],
+    right_scale: float = 1.0,
+) -> dict[int, float]:
+    result = dict(left)
+    for index, value in right.items():
+        combined = result.get(index, 0.0) + (right_scale * value)
+        if abs(combined) <= 1e-15:
+            result.pop(index, None)
+        else:
+            result[index] = combined
+    return result
+
+
 def mask_expression(conditions: list[dict[str, str]]) -> str:
     return f"soma(x_w onde {event_key(conditions)})"
 
@@ -328,31 +353,17 @@ def association_rule_status(
     antecedent: list[dict[str, str]],
     consequent: list[dict[str, str]],
 ) -> dict[str, Any]:
-    # Regra R -> S:
-    # suporte = P(R e S)
-    # confianca/precisao = P(S | R) = P(R e S) / P(R)
-    # lift = confianca / P(S)
+    # Diagnostico empirico. Estes numeros nao tornam a consulta uma regra e nao
+    # medem acuracia de classificacao. A regra so entra no PL quando o Apriori a
+    # gera a partir de um itemset frequente.
     p_antecedent = probability(rows, antecedent)
     p_consequent = probability(rows, consequent)
     p_both = probability(rows, [*antecedent, *consequent])
     confidence = p_both / p_antecedent if p_antecedent > 0 else None
     lift = confidence / p_consequent if confidence is not None and p_consequent > 0 else None
-    accepted = (
-        p_both > MIN_ASSOCIATION_SUPPORT
-        and confidence is not None
-        and confidence > MIN_ASSOCIATION_CONFIDENCE
-    )
-    if accepted:
-        reason = "inserida como restricao linear de confianca"
-    elif p_antecedent <= 0:
-        reason = "rejeitada: antecedente com probabilidade zero"
-    elif p_both <= MIN_ASSOCIATION_SUPPORT:
-        reason = "rejeitada: suporte conjunto zero"
-    else:
-        reason = "rejeitada: confianca zero"
     return {
-        "accepted": accepted,
-        "reason": reason,
+        "accepted": False,
+        "reason": "diagnostico empirico; a inclusao depende da mineracao Apriori",
         "pAntecedent": p_antecedent,
         "pConsequent": p_consequent,
         "pBoth": p_both,
@@ -368,78 +379,44 @@ def condition_signature(conditions: list[dict[str, str]]) -> tuple[tuple[str, st
 def mine_association_rules(
     rows: list[dict[str, str]],
     domains: dict[str, list[str]],
-    max_rules: int = MAX_LEARNED_ASSOCIATION_RULES,
 ) -> list[dict[str, Any]]:
-    # Extracao de conhecimento probabilistico via regras de associacao.
-    # Aqui mineramos regras simples valor_de_atributo -> valor_de_outro_atributo
-    # e mantemos as melhores por lift, confianca e suporte. Elas entram no PL
-    # como conhecimento aprendido independente da consulta escolhida.
+    # Compatibilidade para relatorios que fornecem linhas em vez de Ω. O
+    # algoritmo Apriori propriamente dito recebe mundos unicos com pesos.
     attributes = list(domains.keys())
-    total = len(rows)
-    single_counts: dict[tuple[str, str], int] = {}
-    pair_counts: dict[tuple[tuple[str, str], tuple[str, str]], int] = {}
-
+    world_counts: dict[tuple[str, ...], int] = {}
     for row in rows:
-        row_items = [(attribute, row[attribute]) for attribute in attributes]
-        for item in row_items:
-            single_counts[item] = single_counts.get(item, 0) + 1
-        for antecedent_item in row_items:
-            for consequent_item in row_items:
-                if consequent_item[0] == antecedent_item[0]:
-                    continue
-                key = (antecedent_item, consequent_item)
-                pair_counts[key] = pair_counts.get(key, 0) + 1
+        key = tuple(row[attribute] for attribute in attributes)
+        world_counts[key] = world_counts.get(key, 0) + 1
+    worlds = [
+        {"values": dict(zip(attributes, key)), "count": count}
+        for key, count in world_counts.items()
+    ]
+    return list(
+        mine_apriori_rules(
+            worlds,
+            len(rows),
+            min_support=APRIORI_MIN_SUPPORT,
+            min_confidence=APRIORI_MIN_CONFIDENCE,
+            max_itemset_size=APRIORI_MAX_ITEMSET_SIZE,
+        )["rules"]
+    )
 
-    rules: list[dict[str, Any]] = []
-    seen: set[tuple[tuple[tuple[str, str], ...], tuple[tuple[str, str], ...]]] = set()
-    for antecedent_attribute in attributes:
-        for antecedent_value in domains[antecedent_attribute]:
-            antecedent_item = (antecedent_attribute, antecedent_value)
-            antecedent_count = single_counts.get(antecedent_item, 0)
-            if antecedent_count <= 0:
-                continue
-            antecedent = [{"attribute": antecedent_attribute, "value": antecedent_value}]
-            for consequent_attribute in attributes:
-                if consequent_attribute == antecedent_attribute:
-                    continue
-                for consequent_value in domains[consequent_attribute]:
-                    consequent_item = (consequent_attribute, consequent_value)
-                    consequent = [{"attribute": consequent_attribute, "value": consequent_value}]
-                    signature = (condition_signature(antecedent), condition_signature(consequent))
-                    if signature in seen:
-                        continue
-                    seen.add(signature)
-                    consequent_count = single_counts.get(consequent_item, 0)
-                    if consequent_count <= 0:
-                        continue
-                    both_count = pair_counts.get((antecedent_item, consequent_item), 0)
-                    support = both_count / total
-                    confidence = both_count / antecedent_count
-                    p_consequent = consequent_count / total
-                    lift = confidence / p_consequent if p_consequent > 0 else None
-                    if (
-                        support >= MIN_LEARNED_RULE_SUPPORT
-                        and confidence >= MIN_LEARNED_RULE_CONFIDENCE
-                        and lift is not None
-                        and lift >= MIN_LEARNED_RULE_LIFT
-                    ):
-                        rules.append(
-                            {
-                                "antecedent": antecedent,
-                                "consequent": consequent,
-                                "support": support,
-                                "confidence": confidence,
-                                "lift": lift,
-                            }
-                        )
 
-    rules.sort(key=lambda item: (item["lift"], item["confidence"], item["support"]), reverse=True)
-    return rules[:max_rules]
+@lru_cache(maxsize=1)
+def learned_association_mining() -> dict[str, Any]:
+    data = load_dataset()
+    return mine_apriori_rules(
+        data["worlds"],
+        data["total"],
+        min_support=APRIORI_MIN_SUPPORT,
+        min_confidence=APRIORI_MIN_CONFIDENCE,
+        max_itemset_size=APRIORI_MAX_ITEMSET_SIZE,
+    )
+
 
 @lru_cache(maxsize=1)
 def learned_association_rules() -> tuple[dict[str, Any], ...]:
-    data = load_dataset()
-    return tuple(mine_association_rules(data["rows"], data["domains"]))
+    return tuple(learned_association_mining()["rules"])
 
 
 def find_released_association_rule(
@@ -464,9 +441,9 @@ def association_rule_payload(
     consequent: list[dict[str, str]],
 ) -> dict[str, Any]:
     thresholds = {
-        "support": MIN_LEARNED_RULE_SUPPORT,
-        "confidence": MIN_LEARNED_RULE_CONFIDENCE,
-        "lift": MIN_LEARNED_RULE_LIFT,
+        "support": APRIORI_MIN_SUPPORT,
+        "confidence": APRIORI_MIN_CONFIDENCE,
+        "maxItemsetSize": APRIORI_MAX_ITEMSET_SIZE,
     }
     if rule is None:
         return {
@@ -476,7 +453,7 @@ def association_rule_payload(
             "confidence": None,
             "lift": None,
             "released": False,
-            "reason": "regra nao gerada pela extracao de regras",
+            "reason": "regra nao gerada pelo Apriori com os limiares configurados",
             "thresholds": thresholds,
         }
     return {
@@ -486,35 +463,19 @@ def association_rule_payload(
         "confidence": rule["confidence"],
         "lift": rule["lift"],
         "released": True,
-        "reason": rule.get("source", "liberada pela extracao de regras"),
+        "reason": rule.get("source", "regra gerada pelo Apriori"),
         "thresholds": thresholds,
     }
 
 
 def query_association_rule(
-    rows: list[dict[str, str]],
+    rules: list[dict[str, Any]],
     antecedent: list[dict[str, str]],
     consequent: list[dict[str, str]],
 ) -> dict[str, Any] | None:
-    # A regra da pergunta do usuario tambem e calculada:
-    # B -> A, onde A e o evento alvo e B e o conjunto de afirmacoes.
-    # Isso libera os cards da interface mesmo quando B -> A nao esta entre as
-    # regras globais top-N incorporadas ao PL.
-    status = association_rule_status(rows, antecedent, consequent)
-    if not status["accepted"]:
-        return None
-    return {
-        "antecedent": antecedent,
-        "consequent": consequent,
-        "support": status["pBoth"],
-        "confidence": status["confidence"],
-        "lift": status["lift"],
-        "source": "regra calculada e liberada para a consulta atual",
-    }
-
-
-def add_vectors(left: list[float], right: list[float], right_scale: float = 1.0) -> list[float]:
-    return [left_item + right_scale * right_item for left_item, right_item in zip(left, right)]
+    # A consulta B -> A so recebe medidas de regra quando essa regra pertence a
+    # saida do Apriori. Nao recalculamos uma regra ad hoc para preencher cards.
+    return find_released_association_rule(rules, antecedent, consequent)
 
 
 def build_linear_constraints(
@@ -522,27 +483,32 @@ def build_linear_constraints(
     rows: list[dict[str, str]],
     target: dict[str, str],
     base: list[dict[str, str]],
-) -> tuple[list[list[float]], list[float], list[dict[str, Any]]]:
+) -> tuple[list[dict[int, float]], list[float], list[dict[str, Any]]]:
     # Item 1b: converter probabilidades empiricas em restricoes lineares.
     # A variavel do PL e x_w, a massa de probabilidade de cada mundo possivel.
     # Para cada evento E, criamos:
     #   lower <= soma(x_w onde E) <= upper
     # usando intervalos em torno das frequencias observadas na base.
-    a_ub: list[list[float]] = []
+    a_ub: list[dict[int, float]] = []
     b_ub: list[float] = []
     records: list[dict[str, Any]] = []
+    interval_events: set[tuple[tuple[str, str], ...]] = set()
     attributes = list(rows[0].keys())
     domains = {
         attribute: sorted({row[attribute] for row in rows})
         for attribute in attributes
     }
 
-    def add_interval(kind: str, conditions: list[dict[str, str]], value: float) -> None:
-        mask = world_mask(worlds, conditions)
+    def add_interval(kind: str, conditions: list[dict[str, str]], value: float) -> bool:
+        signature = condition_signature(conditions)
+        if signature in interval_events:
+            return False
+        interval_events.add(signature)
+        mask = sparse_world_mask(worlds, conditions)
         lower, upper = rounded_interval(value)
         a_ub.append(mask)
         b_ub.append(upper)
-        a_ub.append([-item for item in mask])
+        a_ub.append({index: -value for index, value in mask.items()})
         b_ub.append(-lower)
         records.append(
             {
@@ -554,27 +520,36 @@ def build_linear_constraints(
                 "expression": mask_expression(conditions),
             }
         )
+        return True
 
-    def add_released_confidence_rule(rule: dict[str, Any], kind: str = "learned_association_rule") -> None:
-        # Uma regra R -> S com confianca c vira restricao linear:
+    def add_apriori_rule(rule: dict[str, Any]) -> None:
+        # Uma regra Apriori R -> S fornece duas probabilidades para o PL:
+        #   suporte s = P(R e S), uma restricao linear direta; e
+        #   confianca c = P(S | R), linearizada pelas desigualdades abaixo.
+        # Lift permanece metadado descritivo e nao entra como coeficiente.
         #   lower <= P(R e S) / P(R) <= upper
-        # que e reescrita como:
         #   P(R e S) - upper.P(R) <= 0
         #  -P(R e S) + lower.P(R) <= 0
         antecedent = rule["antecedent"]
         consequent = rule["consequent"]
         both = [*antecedent, *consequent]
+        support_constraint_added = add_interval(
+            "apriori_rule_support",
+            both,
+            rule["support"],
+        )
         confidence = rule["confidence"]
         lower, upper = rounded_interval(confidence)
-        antecedent_mask = world_mask(worlds, antecedent)
-        both_mask = world_mask(worlds, both)
-        a_ub.append(add_vectors(both_mask, antecedent_mask, -upper))
+        antecedent_mask = sparse_world_mask(worlds, antecedent)
+        both_mask = sparse_world_mask(worlds, both)
+        a_ub.append(add_sparse_vectors(both_mask, antecedent_mask, -upper))
         b_ub.append(0.0)
-        a_ub.append(add_vectors([-item for item in both_mask], antecedent_mask, lower))
+        negative_both = {index: -value for index, value in both_mask.items()}
+        a_ub.append(add_sparse_vectors(negative_both, antecedent_mask, lower))
         b_ub.append(0.0)
         records.append(
             {
-                "kind": kind,
+                "kind": "apriori_rule_confidence",
                 "antecedent": antecedent,
                 "consequent": consequent,
                 "lower": lower,
@@ -582,7 +557,9 @@ def build_linear_constraints(
                 "value": confidence,
                 "support": rule["support"],
                 "lift": rule["lift"],
-                "source": "resultado do algoritmo de aprendizagem de regras",
+                "source": "saida do algoritmo Apriori",
+                "supportConstraintAdded": support_constraint_added,
+                "liftUsage": "descritivo; nao usado como restricao nem acuracia",
                 "expression": (
                     f"{lower:.3f} <= {mask_expression(both)} / "
                     f"{mask_expression(antecedent)} <= {upper:.3f}"
@@ -611,18 +588,11 @@ def build_linear_constraints(
 
     learned_rules = list(learned_association_rules())
     for rule in learned_rules:
-        add_released_confidence_rule(rule)
+        add_apriori_rule(rule)
 
-    both = [*base, target]
-    # Evidencias especificas da pergunta: P(A), P(B) e P(A e B).
-    # Elas garantem que a consulta P(A | B) seja ancorada no que a base
-    # realmente observou.
-    add_interval("selected_target", [target], probability(rows, [target]))
-    add_interval("selected_base", base, probability(rows, base))
-    add_interval("selected_joint", both, probability(rows, both))
-    selected_released_rule = query_association_rule(rows, base, [target])
-    if selected_released_rule is not None:
-        add_released_confidence_rule(selected_released_rule, "selected_association_rule")
+    # A consulta nao injeta P(A e B) observado como resposta pronta. O solver
+    # infere seus limites usando marginais, conjuntas por pares e todas as
+    # restricoes produzidas pelas regras Apriori.
 
     return a_ub, b_ub, records
 
@@ -664,10 +634,9 @@ def solve_linear_interval(
             "constraintSummary": {
                 "marginal": 0,
                 "pairwiseJoint": 0,
-                "learnedAssociationRule": 0,
-                "selectedAssociationRule": 0,
-                "associationRule": 0,
-                "selected": 0,
+                "aprioriRuleSupport": 0,
+                "aprioriRuleConfidence": 0,
+                "aprioriRules": 0,
             },
             "solver": "atalho empirico: nenhum mundo observado satisfaz A e B",
             "solverMethod": "empirical-zero",
@@ -676,6 +645,7 @@ def solve_linear_interval(
 
     try:
         from scipy.optimize import linprog
+        from scipy.sparse import coo_matrix, csr_matrix, hstack
     except Exception as error:
         return {"ok": False, "error": f"scipy indisponivel: {error}"}
 
@@ -687,15 +657,27 @@ def solve_linear_interval(
 
     # Charnes-Cooper: x = y / t. A razao condicional vira um objetivo linear
     # porque fixamos P(B) em y como denominator_mask . y = 1.
-    transformed_a_ub = []
-    transformed_b_ub = []
-    for row, limit in zip(a_ub, b_ub):
-        transformed_a_ub.append([*row, -limit])
-        transformed_b_ub.append(0.0)
-    transformed_a_eq = [
-        [*([1.0] * n), -1.0],
-        [*denominator_mask, 0.0],
-    ]
+    sparse_values: list[float] = []
+    sparse_rows: list[int] = []
+    sparse_columns: list[int] = []
+    for row_index, row in enumerate(a_ub):
+        for column_index, value in row.items():
+            sparse_rows.append(row_index)
+            sparse_columns.append(column_index)
+            sparse_values.append(value)
+    base_matrix = coo_matrix(
+        (sparse_values, (sparse_rows, sparse_columns)),
+        shape=(len(a_ub), n),
+    ).tocsr()
+    limit_column = csr_matrix([[-limit] for limit in b_ub])
+    transformed_a_ub = hstack([base_matrix, limit_column], format="csr")
+    transformed_b_ub = [0.0] * len(a_ub)
+    transformed_a_eq = csr_matrix(
+        [
+            [*([1.0] * n), -1.0],
+            [*denominator_mask, 0.0],
+        ]
+    )
     transformed_b_eq = [0.0, 1.0]
     transformed_bounds = [(0.0, None)] * (n + 1)
 
@@ -726,15 +708,14 @@ def solve_linear_interval(
         "lower": lower_hi,
         "upper": upper_lo,
         "variables": n,
-        "constraints": len(transformed_a_ub) + len(transformed_a_eq),
+        "constraints": transformed_a_ub.shape[0] + transformed_a_eq.shape[0],
         "baseConstraints": len(a_ub),
         "constraintSummary": {
             "marginal": sum(1 for item in records if item["kind"] == "marginal"),
             "pairwiseJoint": sum(1 for item in records if item["kind"] == "pairwise_joint"),
-            "learnedAssociationRule": sum(1 for item in records if item["kind"] == "learned_association_rule"),
-            "selectedAssociationRule": sum(1 for item in records if item["kind"] == "selected_association_rule"),
-            "associationRule": sum(1 for item in records if "association_rule" in item["kind"]),
-            "selected": sum(1 for item in records if item["kind"].startswith("selected")),
+            "aprioriRuleSupport": sum(1 for item in records if item["kind"] == "apriori_rule_support"),
+            "aprioriRuleConfidence": sum(1 for item in records if item["kind"] == "apriori_rule_confidence"),
+            "aprioriRules": len(learned_association_rules()),
         },
         "solver": f"scipy.optimize.linprog {solver_method}",
         "solverMethod": solver_method,
@@ -750,9 +731,6 @@ def linear_program_text(
     p_ab: float,
     lp: dict[str, Any],
 ) -> str:
-    i_a = rounded_interval(p_a)
-    i_b = rounded_interval(p_b)
-    i_ab = rounded_interval(p_ab)
     numerator = f"soma(x_w onde {event_key([*base, target])})"
     denominator = f"soma(x_w onde {event_key(base)})"
     lines = [
@@ -770,22 +748,23 @@ def linear_program_text(
         "3. Normalizacao probabilistica:",
         "  soma(x_w) = 1",
         "",
-        "4. Evidencias empiricas usadas como restricoes intervalares:",
-        f"  {i_a[0]:.3f} <= P(A) = soma(x_w onde {event_key([target])}) <= {i_a[1]:.3f}",
-        f"  {i_b[0]:.3f} <= P(B) = {denominator} <= {i_b[1]:.3f}",
-        f"  {i_ab[0]:.3f} <= P(A e B) = {numerator} <= {i_ab[1]:.3f}",
-        "  O LP completo tambem inclui marginais de cada valor e conjuntas por pares de valores.",
-        "  Observacao: P(A e B) tambem e usado como suporte quando a regra B -> A da consulta e liberada.",
+        "4. Evidencias globais usadas como restricoes intervalares:",
+        "  O LP inclui marginais de cada valor e conjuntas por pares de valores.",
+        "  P(A), P(B) e P(A e B) abaixo sao exibidos para auditoria da consulta:",
+        f"  P(A) empirico = {p_a:.3f}",
+        f"  P(B) empirico = {p_b:.3f}",
+        f"  P(A e B) empirico = {p_ab:.3f}",
+        "  A consulta nao injeta P(A e B) como resposta pronta no LP.",
         "",
-        "5. Regras de associacao:",
-        "  O sistema minera regras globais R -> S e tambem calcula a regra B -> A da consulta atual.",
-        "  O PL consome esses valores quando a regra tem suporte e confianca positivos.",
-        "  Se B -> A nao tiver suporte empirico, suporte, confianca e lift da consulta ficam sem valor.",
+        "5. Mineracao Apriori e regras lineares:",
+        "  O Apriori recebe os mundos observados de Omega como transacoes ponderadas.",
+        "  Para cada regra R -> S gerada, o suporte ancora P(R e S).",
+        "  A confianca ancora P(R e S) = confianca.P(R), em forma linear intervalar.",
+        "  Todas as regras que atingem suporte e confianca minimos entram no LP.",
         "",
-        "6. Classificacao:",
-        "  Quando a base possui atributo de classe, a consulta pode ser avaliada como classificador binario.",
-        "  A tela mostra acuracia, precisao, recall e F1 para a regra B -> A.",
-        "  Uma extensao natural e listar P(c | x) para cada classe c e cada valor x dos atributos.",
+        "6. Papel do lift:",
+        "  Lift e apenas uma medida descritiva da associacao retornada pelo Apriori.",
+        "  Ele nao mede acuracia, nao seleciona as regras e nao vira coeficiente do LP.",
         "",
         "7. Consulta condicional:",
         "  P(A | B) = P(A e B) / P(B)",
@@ -848,8 +827,8 @@ def full_linear_program_text(
         "",
         "1. O dataset e categorizado para permitir consultas logicas sobre atributos e valores.",
         "2. Cada combinacao observada vira um mundo possivel com uma variavel x_w.",
-        "3. Frequencias empiricas viram restricoes intervalares do programa linear.",
-        "4. Regras de associacao fornecem suporte, confianca e lift para a consulta atual quando ha suporte empirico.",
+        "3. Marginais e conjuntas por pares viram restricoes intervalares do programa linear.",
+        "4. O Apriori minera Omega e fornece suporte/confianca para novas restricoes lineares.",
         "5. A consulta P(A | B) e resolvida por Charnes-Cooper e HiGHS.",
         "",
         "Variaveis originais:",
@@ -872,13 +851,14 @@ def full_linear_program_text(
         "Resumo quantitativo:",
         f"  Variaveis do solver apos Charnes-Cooper: {lp.get('variables', len(worlds)) + 1}",
         f"  Restricoes lineares no solver: {lp.get('constraints', '-')}",
-        f"  Restricoes intervalares/de associacao antes da transformacao: {lp.get('baseConstraints', '-')}",
+        f"  Restricoes intervalares/Apriori antes da transformacao: {lp.get('baseConstraints', '-')}",
         f"  Agrupamento: {lp.get('constraintSummary', {})}",
         "",
         "Observacao sobre P(A e B):",
         "  A soma sempre lista todas as condicoes simultaneas que definem o evento.",
         "  Se B possui duas afirmacoes e A possui uma, P(A e B) aparece com tres condicoes porque representa a intersecao completa.",
-        "  Alem da consulta selecionada, este arquivo inclui restricoes conjuntas para cada par de atributos/valores da base.",
+        "  O valor empirico da consulta e mostrado para auditoria, mas P(A e B) nao e injetado como resposta pronta.",
+        "  O LP usa conjuntas de todos os pares e suportes/confiancas das regras geradas pelo Apriori.",
         "",
         "PROBABILIDADES EXPLICITAS DO EVENTO A",
         "",
@@ -900,7 +880,8 @@ def full_linear_program_text(
         candidate_joint = [*base, *candidate]
         lines.append(f"  P({event_key(candidate_joint)}) = {probability(rows, candidate_joint):.3f}")
 
-    learned_rules = mine_association_rules(rows, domains)
+    mining = learned_association_mining()
+    learned_rules = list(mining["rules"])
     lines.extend(
         [
             "",
@@ -908,15 +889,18 @@ def full_linear_program_text(
             "",
             (
                 "Estas regras nao dependem da consulta escolhida pelo usuario. "
-                "Elas sao a saida do algoritmo de aprendizagem de regras; o programa linear "
-                "consome suporte, confianca e lift ja retornados por esse algoritmo."
+                "Elas sao geradas pelo Apriori sobre Omega; o programa linear usa "
+                "suporte e confianca como probabilidades das restricoes."
             ),
             (
-                f"Limiar usado: suporte >= {MIN_LEARNED_RULE_SUPPORT:.3f}, "
-                f"confianca >= {MIN_LEARNED_RULE_CONFIDENCE:.3f}, "
-                f"lift >= {MIN_LEARNED_RULE_LIFT:.3f}."
+                f"Limiar usado: suporte >= {APRIORI_MIN_SUPPORT:.3f}, "
+                f"confianca >= {APRIORI_MIN_CONFIDENCE:.3f}; "
+                f"itemset maximo = {APRIORI_MAX_ITEMSET_SIZE}."
             ),
-            f"Total de regras aprendidas incorporadas: {len(learned_rules)}",
+            f"Mundos observados em Omega: {mining['omegaWorlds']}",
+            f"Itemsets frequentes: {mining['frequentItemsets']}",
+            f"Total de regras Apriori incorporadas: {len(learned_rules)}",
+            "Lift e exibido apenas como diagnostico; nao filtra regras e nao entra no LP.",
         ]
     )
     for index, rule in enumerate(learned_rules, start=1):
@@ -934,19 +918,19 @@ def full_linear_program_text(
             f"  {event_key(base)} -> {event_key([target])}",
         ]
     )
-    released_rule = query_association_rule(rows, base, [target])
+    released_rule = query_association_rule(learned_rules, base, [target])
     if released_rule is None:
         lines.extend(
             [
-                "  Status: nao liberada para a consulta atual.",
-                "  Suporte, confianca e lift ficam sem valor porque P(B)=0 ou P(A e B)=0.",
-                "  A consulta continua usando P(A), P(B) e P(A e B) como evidencias do PL.",
+                "  Status: esta regra nao foi gerada pelo Apriori.",
+                "  Suporte, confianca e lift ficam sem valor como medidas de regra.",
+                "  A consulta continua sendo resolvida pelas restricoes globais do PL.",
             ]
         )
     else:
         lines.extend(
             [
-                "  Status: liberada para a consulta atual.",
+                "  Status: regra encontrada na saida do Apriori.",
                 f"  suporte={released_rule['support']:.3f}, confianca={released_rule['confidence']:.3f}, lift={released_rule['lift']:.3f}",
                 "  A confianca liberada vira restricao linear ativa.",
             ]
@@ -985,11 +969,8 @@ def full_linear_program_text(
     grouped_titles = {
         "marginal": "1. Probabilidades marginais",
         "pairwise_joint": "2. Probabilidades conjuntas por pares de valores",
-        "learned_association_rule": "3. Regras de associacao aprendidas do dataset e aceitas como restricao ativa",
-        "selected_target": "4. Evento alvo A da consulta",
-        "selected_base": "5. Evento condicionante B da consulta",
-        "selected_joint": "6. Evento conjunto A e B da consulta",
-        "selected_association_rule": "7. Regra de associacao selecionada B -> A aceita como restricao ativa",
+        "apriori_rule_support": "3. Suportes de itemsets Apriori adicionados como restricoes",
+        "apriori_rule_confidence": "4. Confiancas das regras Apriori linearizadas",
     }
     for kind, title in grouped_titles.items():
         selected_records = [item for item in records if item["kind"] == kind]
@@ -1034,29 +1015,6 @@ def conclusion_text(
             "a quantidade de condicoes ou escolha valores mais frequentes."
         )
 
-    confidence_label = "baixa"
-    if confidence is not None and confidence >= 0.7:
-        confidence_label = "alta"
-    elif confidence is not None and confidence >= 0.3:
-        confidence_label = "moderada"
-
-    lift_sentence = "O lift nao foi calculado."
-    if lift is not None:
-        if lift > 1.2:
-            lift_sentence = (
-                f"O lift de {lift:.3f} indica associacao positiva: o evento A fica mais provavel "
-                "quando as condicoes B ocorrem."
-            )
-        elif lift < 0.8:
-            lift_sentence = (
-                f"O lift de {lift:.3f} indica associacao negativa: o evento A fica menos provavel "
-                "quando as condicoes B ocorrem."
-            )
-        else:
-            lift_sentence = (
-                f"O lift de {lift:.3f} indica associacao fraca ou proxima da independencia."
-            )
-
     interval_sentence = ""
     if lp.get("ok"):
         interval_sentence = (
@@ -1065,51 +1023,14 @@ def conclusion_text(
         )
 
     return (
-        f"Para a regra liberada {base_label} -> {target_label}, a consulta atual "
-        f"retornou confianca {confidence:.3f}, considerada {confidence_label}, suporte "
-        f"{support:.3f} e lift {lift:.3f}. Na base, foram encontrados {count_both} "
-        f"casos favoraveis dentro de {count_base} casos que satisfazem B. "
-        f"{lift_sentence}{interval_sentence}"
+        f"O Apriori gerou a regra {base_label} -> {target_label} com suporte "
+        f"{support:.3f} e confianca {confidence:.3f}. Esses valores foram convertidos "
+        "em restricoes lineares de probabilidade. "
+        f"O lift {fmt_lp_number(lift)} fica apenas como descricao da associacao: nao e "
+        "acuracia, nao seleciona a regra e nao entra como coeficiente do programa linear. "
+        f"Na base, existem {count_both} ocorrencias conjuntas em {count_base} casos de B."
+        f"{interval_sentence}"
     )
-
-
-def classification_metrics(
-    count_a: int,
-    count_b: int,
-    count_ab: int,
-    total: int,
-) -> dict[str, Any]:
-    # Se a base tem variavel de classe, a regra B -> A pode ser avaliada como
-    # classificador binario: quando B ocorre, prediz A; quando B nao ocorre,
-    # prediz nao A. Da matriz VP/FP/FN/VN saem acuracia, precisao, recall e F1.
-    true_positive = count_ab
-    false_positive = count_b - count_ab
-    false_negative = count_a - count_ab
-    true_negative = total - true_positive - false_positive - false_negative
-
-    precision = true_positive / (true_positive + false_positive) if true_positive + false_positive > 0 else None
-    recall = true_positive / (true_positive + false_negative) if true_positive + false_negative > 0 else None
-    accuracy = (true_positive + true_negative) / total if total > 0 else None
-    f1 = (
-        2 * precision * recall / (precision + recall)
-        if precision is not None and recall is not None and precision + recall > 0
-        else None
-    )
-
-    return {
-        "accuracy": accuracy,
-        "precision": precision,
-        "recall": recall,
-        "f1": f1,
-        "truePositive": true_positive,
-        "falsePositive": false_positive,
-        "falseNegative": false_negative,
-        "trueNegative": true_negative,
-        "interpretation": (
-            "A avaliacao trata a regra B -> A como um classificador binario: "
-            "quando B ocorre, o modelo prediz A; quando B nao ocorre, prediz nao A."
-        ),
-    }
 
 
 @app.get("/")
@@ -1151,6 +1072,7 @@ def static_files(path: str):
 @app.get("/api/metadata")
 def metadata():
     data = load_dataset()
+    mining = learned_association_mining()
     return jsonify(
         {
             "attributes": data["attributes"],
@@ -1160,6 +1082,12 @@ def metadata():
             "domains": data["domains"],
             "labels": data["labels"],
             "thresholds": data["thresholds"],
+            "omegaWorlds": len(data["worlds"]),
+            "apriori": {
+                key: value
+                for key, value in mining.items()
+                if key != "rules"
+            },
         }
     )
 
@@ -1191,23 +1119,23 @@ def compute_query(
     count_a = probability_count(rows, [target])
     count_both = probability_count(rows, both)
     count_base = probability_count(rows, base)
-    learned_rules = list(learned_association_rules())
-    released_rule = query_association_rule(rows, base, [target])
+    mining = learned_association_mining()
+    learned_rules = list(mining["rules"])
+    released_rule = query_association_rule(learned_rules, base, [target])
     queried_rule = association_rule_payload(released_rule, base, [target])
     rule_support = released_rule["support"] if released_rule else None
     rule_confidence = released_rule["confidence"] if released_rule else None
     rule_lift = released_rule["lift"] if released_rule else None
     lp = solve_linear_interval(data["worlds"], rows, target, base, solver_method, solver_name)
-    classification = classification_metrics(count_a, count_base, count_both, data["total"])
     finished_at = datetime.now(timezone.utc)
     duration_seconds = time.perf_counter() - started_perf
     conclusion = (
         conclusion_text(target, base, rule_support, rule_confidence, rule_lift, p_b, count_base, count_both, lp)
         if released_rule
         else (
-            f"Para a regra {event_key(base)} -> {event_key([target])}, nao ha suporte empirico "
-            "positivo para liberar uma regra correspondente. Por isso suporte, confianca e lift nao sao "
-            "informados como metricas de regra."
+            f"A consulta {event_key(base)} -> {event_key([target])} nao aparece entre as regras "
+            "geradas pelo Apriori. Por isso suporte, confianca e lift nao sao preenchidos como "
+            "medidas de uma regra; o intervalo continua sendo inferido pelas restricoes globais."
         )
     )
 
@@ -1240,15 +1168,19 @@ def compute_query(
                 "confidence": rule["confidence"],
                 "lift": rule["lift"],
             }
-            for rule in learned_rules
+            for rule in learned_rules[:APRIORI_RULE_PREVIEW_LIMIT]
         ],
+        "aprioriMining": {
+            key: value
+            for key, value in mining.items()
+            if key != "rules"
+        },
         "queriedAssociationRule": queried_rule,
         "releasedAssociationRule": (
             association_rule_payload(released_rule, base, [target])
             if released_rule
             else None
         ),
-        "classification": classification,
         "linearProgramSummary": linear_program_text(target, base, p_a, p_b, p_ab, lp),
         "linearProgram": linear_program_text(target, base, p_a, p_b, p_ab, lp),
         "linearProgramFullAvailable": True,
@@ -1578,10 +1510,10 @@ def write_query_report(result: dict[str, Any]) -> None:
                 ["Metrica", "Valor"],
                 ["P(A)", format_report_probability(result["pA"])],
                 ["P(B)", format_report_probability(result["pB"])],
-                ["P(A e B) usado no PL", format_report_probability(result["pAB"])],
-                ["Suporte da regra liberada", format_report_probability(result["support"])],
-                ["Confianca da regra liberada", format_report_probability(result["confidence"])],
-                ["Lift", format_report_number(result["lift"])],
+                ["P(A e B) empirico (auditoria)", format_report_probability(result["pAB"])],
+                ["Suporte da regra Apriori", format_report_probability(result["support"])],
+                ["Confianca da regra Apriori", format_report_probability(result["confidence"])],
+                ["Lift descritivo", format_report_number(result["lift"])],
                 ["Instancias", f"{result['countBoth']} / {result['countBase']}"],
                 ["Intervalo linear", interval],
                 ["Inicio", result["processing"]["startedAt"]],
@@ -1590,26 +1522,17 @@ def write_query_report(result: dict[str, Any]) -> None:
             ]
         ),
         Spacer(1, 0.18 * cm),
-        Paragraph("Acuracia do modelo probabilistico", styles["Heading2"]),
-        table(
-            [
-                ["Metrica de classificacao", "Valor"],
-                ["Acuracia", format_report_probability(result["classification"]["accuracy"])],
-                ["Precisao", format_report_probability(result["classification"]["precision"])],
-                ["Recall", format_report_probability(result["classification"]["recall"])],
-                ["F1-score", format_report_probability(result["classification"]["f1"])],
-                [
-                    "Matriz binaria",
-                    (
-                        f"VP={result['classification']['truePositive']}, "
-                        f"FP={result['classification']['falsePositive']}, "
-                        f"FN={result['classification']['falseNegative']}, "
-                        f"VN={result['classification']['trueNegative']}"
-                    ),
-                ],
-            ]
+        Paragraph("Mineracao Apriori e restricoes", styles["Heading2"]),
+        Paragraph(
+            (
+                f"Omega contem {result['aprioriMining']['omegaWorlds']} mundos observados. "
+                f"O Apriori encontrou {result['aprioriMining']['frequentItemsets']} itemsets "
+                f"frequentes e gerou {result['aprioriMining']['ruleCount']} regras. Suporte e "
+                "confianca sao transformados em restricoes lineares; lift e apenas descritivo "
+                "e nao representa acuracia."
+            ),
+            body,
         ),
-        Paragraph(result["classification"]["interpretation"], body),
         Spacer(1, 0.18 * cm),
         Paragraph("Conclusao", styles["Heading2"]),
         Paragraph(result["conclusion"], body),
@@ -1626,7 +1549,7 @@ def write_query_report(result: dict[str, Any]) -> None:
             "Nilsson, N. J. Probabilistic Logic. Artificial Intelligence, 1986.<br/>"
             "Charnes, A.; Cooper, W. W. Programming with linear fractional functionals. Naval Research Logistics Quarterly, 1962.<br/>"
             "Tessem, B. Interval probability propagation. International Journal of Approximate Reasoning, 1992.<br/>"
-            "Artigos e materiais disponibilizados pelo professor no Classroom.",
+            "Agrawal, R.; Srikant, R. Fast algorithms for mining association rules. VLDB, 1994.",
             body,
         ),
     ]

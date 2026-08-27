@@ -371,7 +371,7 @@ def build_report() -> None:
             "Gurobi docs: https://docs.gurobi.com/current/<br/>"
             "lp_solve: https://sourceforge.net/projects/lpsolve/<br/>"
             "cuPDLP-C: https://github.com/COPT-Public/cuPDLP-C<br/>"
-            "Laplace smoothing: materiais indicados no Classroom e referencias complementares.",
+            "Laplace smoothing: fundamentos de estimacao probabilistica e referencias estatisticas complementares.",
             code,
         )
     )

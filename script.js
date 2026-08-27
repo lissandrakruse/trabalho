@@ -16,7 +16,6 @@ const confidenceValue = document.querySelector("#confidenceValue");
 const liftValue = document.querySelector("#liftValue");
 const countValue = document.querySelector("#countValue");
 const probabilityText = document.querySelector("#probabilityText");
-const classificationMetrics = document.querySelector("#classificationMetrics");
 const solverCompareStatus = document.querySelector("#solverCompareStatus");
 const solverDemo = document.querySelector("#solverDemo");
 const solverComparison = document.querySelector("#solverComparison");
@@ -102,38 +101,9 @@ function fmtCompare(value) {
 }
 
 function ruleFromResult(result) {
-  // Os cards mostram a regra B -> A da consulta atual. Se o backend mandar a
-  // regra pronta, usamos ela; se mandar apenas P(A), P(A e B) e contagens,
-  // recalculamos suporte, confianca e lift no frontend.
-  if (result.releasedAssociationRule) return result.releasedAssociationRule;
-
-  const support = Number(result.support ?? result.pAB);
-  const confidence = Number(result.confidence ?? (
-    Number(result.countBase) > 0 ? Number(result.countBoth) / Number(result.countBase) : NaN
-  ));
-  const lift = Number(result.lift ?? (
-    Number(result.pA) > 0 ? confidence / Number(result.pA) : NaN
-  ));
-
-  if (
-    Number(result.countBase) <= 0
-    || Number(result.countBoth) <= 0
-    || Number.isNaN(support)
-    || Number.isNaN(confidence)
-    || Number.isNaN(lift)
-  ) {
-    return null;
-  }
-
-  return {
-    antecedent: result.conditions,
-    consequent: [result.target],
-    support,
-    confidence,
-    lift,
-    reason: "regra calculada pela interface a partir das evidencias empiricas da consulta",
-    released: true,
-  };
+  // A interface nunca fabrica uma regra para preencher os cards. As medidas
+  // aparecem apenas quando B -> A pertence a saida real do Apriori.
+  return result.releasedAssociationRule || null;
 }
 
 function eventLabel(conditions) {
@@ -222,10 +192,10 @@ function renderSolverComparison(result) {
   const labels = {
     pA: "P(A)",
     pB: "P(B)",
-    pAB: "P(A e B) usado no PL",
-    support: "Suporte da regra",
-    confidence: "Confianca da regra",
-    lift: "Lift",
+    pAB: "P(A e B) empirico (auditoria)",
+    support: "Suporte da regra Apriori",
+    confidence: "Confianca da regra Apriori",
+    lift: "Lift descritivo",
     countBoth: "Casos A e B",
     countBase: "Casos B",
     linearLower: "Limite inferior",
@@ -274,7 +244,7 @@ function renderSolverComparison(result) {
     `<div><span>Solver</span><strong>HiGHS</strong><small>via scipy.optimize.linprog</small></div>`,
     `<div><span>Transformacao</span><strong>Charnes-Cooper</strong><small>razao condicional para LP</small></div>`,
     `<div><span>Modelo</span><strong>${fmtCompare(linear.variables)}</strong><small>variaveis x_w</small></div>`,
-    `<div><span>Restricoes</span><strong>${fmtCompare(linear.constraints)}</strong><small>marginais, conjunta e normalizacao</small></div>`,
+    `<div><span>Restricoes</span><strong>${fmtCompare(linear.constraints)}</strong><small>marginais, pares e regras Apriori</small></div>`,
     `</div>`,
     `<p>Resultado do solver separado padrao: <strong>${intervalTextValue}</strong>. O painel abaixo compara esse resultado com o calculo principal do projeto e com os 3 metodos executados.</p>`,
     `<p><strong>Solvers executados:</strong> SciPy HiGHS, HiGHS Dual Simplex e HiGHS Interior Point. Gurobi, lp_solve e cuPDLP-C ficam documentados como comparacao tecnica.</p>`,
@@ -295,22 +265,6 @@ function renderSolverComparison(result) {
   ].join("");
 }
 
-function renderClassificationMetrics(classification) {
-  if (!classification) {
-    classificationMetrics.innerHTML = "";
-    return;
-  }
-
-  classificationMetrics.innerHTML = [
-    `<article><span>Acuracia</span><strong>${fmt(classification.accuracy)}</strong></article>`,
-    `<article><span>Precisao</span><strong>${fmt(classification.precision)}</strong></article>`,
-    `<article><span>Recall</span><strong>${fmt(classification.recall)}</strong></article>`,
-    `<article><span>F1-score</span><strong>${fmt(classification.f1)}</strong></article>`,
-    `<p>${escapeHtml(classification.interpretation)}</p>`,
-    `<p>Matriz binaria: VP=${classification.truePositive}, FP=${classification.falsePositive}, FN=${classification.falseNegative}, VN=${classification.trueNegative}.</p>`,
-  ].join("");
-}
-
 function renderMathModel(result) {
   const aLabel = escapeHtml(eventLabel([result.target]));
   const bLabel = escapeHtml(eventLabel(result.conditions));
@@ -321,23 +275,24 @@ function renderMathModel(result) {
     ? `${fmt(result.linear.lower)} <= P(A | B) <= ${fmt(result.linear.upper)}`
     : "Nao calculado para esta consulta.";
   const learnedRules = result.learnedAssociationRules || [];
+  const mining = result.aprioriMining || {};
   const releasedRule = ruleFromResult(result);
   const releasedRuleText = releasedRule
     ? `<code>${eventLabel(releasedRule.antecedent)} -> ${eventLabel(releasedRule.consequent)}; suporte=${fmt(releasedRule.support)}, confianca=${fmt(releasedRule.confidence)}, lift=${fmt(releasedRule.lift)}</code>`
-    : `<code>A consulta ${eventLabel(result.conditions)} -> ${eventLabel([result.target])} nao tem suporte empirico positivo; suporte, confianca e lift ficam sem valor.</code>`;
+    : `<code>A consulta ${eventLabel(result.conditions)} -> ${eventLabel([result.target])} nao foi gerada pelo Apriori; as medidas de regra ficam vazias.</code>`;
   const learnedRuleItems = learnedRules.length
     ? learnedRules
         .map((rule) => `<code>${eventLabel(rule.antecedent)} -> ${eventLabel(rule.consequent)}; sup=${fmt(rule.support)}, conf=${fmt(rule.confidence)}, lift=${fmt(rule.lift)}</code>`)
         .join("")
-    : "<code>Nenhuma regra aprendida atingiu os limiares.</code>";
+    : "<code>Nenhuma regra Apriori foi gerada.</code>";
 
   mathModel.innerHTML = [
     `<section class="math-block"><h3>1. Preparacao da base</h3><p>O projeto le o dataset de recomendacao de culturas, transforma atributos numericos em faixas categoricas e deixa cada registro pronto para perguntas do tipo <strong>P(A | B)</strong>. Nesta consulta, A = <strong>${aLabel}</strong> e B = <strong>${bLabel}</strong>.</p><div class="constraint-list"><code>A = ${aLabel}</code><code>B = ${bLabel}</code><code>A e B = ${abLabel}</code></div></section>`,
-    `<section class="math-block"><h3>2. Mundos possiveis</h3><p>Cada combinacao categorica observada na base vira um mundo possivel <strong>w</strong>. O programa cria uma variavel <strong>x<sub>w</sub></strong> para representar a massa de probabilidade daquele mundo.</p><div class="constraint-list"><code>x<sub>w</sub> >= 0, para todo w em W</code><code>|W| = ${variableCount}</code><code>sum<sub>w em W</sub> x<sub>w</sub> = 1</code></div></section>`,
-    `<section class="math-block"><h3>3. Evidencias empiricas</h3><p>As frequencias da base nao sao apresentadas como regras automaticamente. Elas entram no programa linear como restricoes intervalares para eventos observados: marginais, conjuntas por pares e evidencias da consulta.</p><div class="constraint-list"><code>P(A): ${intervalText(result.pA)}</code><code>P(B): ${intervalText(result.pB)}</code><code>P(A e B): ${intervalText(result.pAB)}</code><code>L <= sum(x<sub>w</sub> onde evento) <= U</code></div></section>`,
-    `<section class="math-block"><h3>4. Regras liberadas</h3><p>Suporte, confianca e lift sao calculados para a regra da consulta atual quando existem ocorrencias de B e de A e B no dataset.</p><div class="constraint-list"><code>suporte(R -> S) = P(R e S)</code><code>confianca(R -> S) = P(S | R)</code><code>lift(R -> S) = confianca / P(S)</code>${releasedRuleText}</div></section>`,
-    `<section class="math-block"><h3>5. Regras no PL</h3><p>Antes da consulta, o sistema minera regras gerais do dataset e incorpora as melhores como conhecimento aprendido. Quando a consulta B -> A tambem foi liberada, ela entra como restricao de confianca; caso contrario, ela continua sendo uma pergunta, mas nao vira metrica de regra.</p><div class="constraint-list"><code>limiares: suporte >= 0.010; confianca >= 0.200; lift >= 1.050</code><code>L <= P(R e S) / P(R) <= U</code><code>P(R e S) - U.P(R) <= 0</code><code>-P(R e S) + L.P(R) <= 0</code>${learnedRuleItems}</div></section>`,
-    `<section class="math-block"><h3>6. Classificacao</h3><p>Como a base possui uma variavel de classe, o projeto tambem interpreta a regra B -> A como classificador binario para calcular acuracia, precisao, recall e F1. Em uma extensao, o mesmo fluxo pode listar P(c | x) para cada classe c e cada valor x dos atributos.</p><div class="constraint-list"><code>precisao = VP / (VP + FP)</code><code>recall = VP / (VP + FN)</code><code>F1 = 2.precisao.recall / (precisao + recall)</code></div></section>`,
+    `<section class="math-block"><h3>2. Mundos possiveis Omega</h3><p>Cada combinacao categorica observada forma um mundo <strong>w</strong> de Ω, preservando sua contagem. O programa cria uma variavel <strong>x<sub>w</sub></strong> para a massa de probabilidade desse mundo.</p><div class="constraint-list"><code>x<sub>w</sub> >= 0, para todo w em Omega</code><code>|Omega| = ${mining.omegaWorlds ?? variableCount}</code><code>sum<sub>w em Omega</sub> x<sub>w</sub> = 1</code></div></section>`,
+    `<section class="math-block"><h3>3. Apriori</h3><p>Ω e fornecido ao Apriori como conjunto de transacoes ponderadas. O algoritmo encontrou <strong>${mining.frequentItemsets ?? "-"}</strong> itemsets frequentes e gerou <strong>${mining.ruleCount ?? learnedRules.length}</strong> regras. O suporte minimo e apenas o criterio de frequencia do Apriori; confianca e lift nao filtram qualidade.</p><div class="constraint-list"><code>suporte minimo = ${fmt(mining.minSupport)}</code><code>confianca minima = ${fmt(mining.minConfidence)}</code><code>tamanho maximo do itemset = ${mining.maxItemsetSize ?? "-"}</code></div></section>`,
+    `<section class="math-block"><h3>4. Medidas da regra</h3><p>Suporte e confianca sao probabilidades usadas para construir restricoes. Lift fica apenas como descricao da associacao; nao representa acuracia e nao e usado para filtrar regras.</p><div class="constraint-list"><code>suporte(R -> S) = P(R e S)</code><code>confianca(R -> S) = P(R e S) / P(R)</code><code>lift(R -> S) = confianca / P(S) [somente descritivo]</code>${releasedRuleText}</div></section>`,
+    `<section class="math-block"><h3>5. Regras convertidas em restricoes</h3><p>Todas as regras geradas entram na formulacao. O suporte ancora a intersecao e a confianca vira duas desigualdades lineares. A ordem da lista e apenas deterministica, nao um ranking de qualidade.</p><div class="constraint-list"><code>Lsup <= P(R e S) <= Usup</code><code>P(R e S) - Uconf.P(R) <= 0</code><code>-P(R e S) + Lconf.P(R) <= 0</code>${learnedRuleItems}</div></section>`,
+    `<section class="math-block"><h3>6. Marginais e pares</h3><p>As probabilidades marginais e conjuntas por pares sao somadas as restricoes Apriori. P(A), P(B) e P(A e B) abaixo servem para auditoria; a consulta nao injeta sua propria resposta conjunta no LP.</p><div class="constraint-list"><code>P(A) empirico = ${fmt(result.pA)}</code><code>P(B) empirico = ${fmt(result.pB)}</code><code>P(A e B) empirico = ${fmt(result.pAB)}</code><code>L <= sum(x<sub>w</sub> onde evento) <= U</code></div></section>`,
     `<section class="math-block"><h3>7. Consulta condicional</h3><p>A pergunta final continua sendo probabilistica: qual intervalo e possivel para A quando B ocorre, respeitando as evidencias da base e as regras liberadas?</p><code>P(A | B) = P(A e B) / P(B) = sum(x<sub>w</sub> onde ${abLabel}) / sum(x<sub>w</sub> onde ${bLabel})</code></section>`,
     `<section class="math-block"><h3>8. Charnes-Cooper</h3><p>Como P(A | B) e uma razao, o modelo aplica Charnes-Cooper para transformar o problema fracionario em programacao linear.</p><div class="constraint-list"><code>y<sub>w</sub> = x<sub>w</sub> / P(B)</code><code>t = 1 / P(B)</code><code>sum(y<sub>w</sub> onde B) = 1</code><code>A y - b t <= 0</code><code>sum<sub>w em W</sub> y<sub>w</sub> - t = 0</code></div></section>`,
     `<section class="math-block"><h3>9. Solver</h3><p>O HiGHS resolve dois programas lineares: um minimiza e outro maximiza a massa dos mundos que satisfazem A e B. A comparacao executa highs, highs-ds e highs-ipm para avaliar consistencia numerica e tempo.</p><div class="constraint-list"><code>min sum(y<sub>w</sub> onde ${abLabel})</code><code>max sum(y<sub>w</sub> onde ${abLabel})</code><code>restricoes lineares: ${constraintCount}</code></div><p><strong>Resultado:</strong> ${interval}.</p></section>`,
@@ -346,7 +301,7 @@ function renderMathModel(result) {
 
 async function runQuery() {
   // Botao "Consultar": envia A e B para /api/query e renderiza cards,
-  // explicacao probabilistica, acuracia e formulacao matematica.
+  // explicacao probabilistica, Apriori e formulacao matematica.
   runQueryButton.disabled = true;
   runQueryButton.textContent = "Resolvendo...";
   downloadReportLink.classList.add("is-hidden");
@@ -355,7 +310,6 @@ async function runQuery() {
   liftValue.textContent = "-";
   countValue.textContent = "-";
   probabilityText.innerHTML = "<div>Calculando consulta...</div>";
-  classificationMetrics.innerHTML = "";
   linearProgram.textContent = "";
   mathModel.innerHTML = "";
   const payload = buildPayload();
@@ -388,29 +342,23 @@ async function runQuery() {
       ? `<div><strong>Contagem empirica:</strong> existem ${result.countBase} registros que satisfazem B, mas nenhum deles tambem satisfaz A.</div>`
       : "";
     const releasedRuleNotice = releasedRule
-      ? `<div><strong>Regra liberada encontrada:</strong> os cards usam suporte, confianca e lift calculados para a consulta atual.</div>`
-      : `<div><strong>Sem regra liberada:</strong> a consulta nao tem suporte empirico positivo. Por isso suporte, confianca e lift ficam sem valor nos cards.</div>`;
+      ? `<div><strong>Regra Apriori encontrada:</strong> os cards mostram as medidas retornadas pelo minerador.</div>`
+      : `<div><strong>Consulta sem regra Apriori correspondente:</strong> as medidas ficam vazias, mas o solver continua usando as demais regras e restricoes globais.</div>`;
     const ruleMetricContent = releasedRule
       ? [
-          `<div><strong>Suporte:</strong> ${fmt(releasedRule.support)} fornecido pela regra liberada.</div>`,
-          `<div><strong>Confianca/Precisao:</strong> ${fmt(releasedRule.confidence)} fornecida pela regra liberada.</div>`,
-          `<div><strong>Lift:</strong> ${fmt(releasedRule.lift)} fornecido pela regra liberada.</div>`,
+          `<div><strong>Suporte:</strong> ${fmt(releasedRule.support)} usado para restringir P(R e S).</div>`,
+          `<div><strong>Confianca:</strong> ${fmt(releasedRule.confidence)} usada na restricao P(R e S) = c.P(R).</div>`,
+          `<div><strong>Lift:</strong> ${fmt(releasedRule.lift)} apenas descritivo; nao mede acuracia e nao filtra regras.</div>`,
         ].join("")
-      : `<div><strong>Suporte, confianca e lift nos cards:</strong> - (nenhuma regra liberada para esta consulta).</div>`;
+      : `<div><strong>Suporte, confianca e lift nos cards:</strong> - (a consulta nao pertence a saida do Apriori).</div>`;
     const queriedRuleContent = queriedRule
       ? `<div><strong>Status da regra consultada:</strong> ${escapeHtml(queriedRule.reason || "-")}.</div>`
       : "";
     const conclusionContent = releasedRule
       ? result.conclusion
-      : `Para ${eventLabel(result.conditions)} -> ${eventLabel([result.target])}, nao ha suporte empirico positivo para liberar a regra. A interface mantem suporte, confianca e lift sem valor.`;
-    const ruleLabel = releasedRule ? "Regra liberada" : "Consulta sem regra liberada";
-    const learnedRuleCount = result.learnedAssociationRules?.length || 0;
-    const topLearnedRule = result.learnedAssociationRules?.[0];
-    const learnedRulePreview = topLearnedRule
-      ? `Foi incorporada a top regra aprendida do dataset ao programa linear, independentemente da consulta atual: ${eventLabel(topLearnedRule.antecedent)} -> ${eventLabel(topLearnedRule.consequent)}; suporte=${fmt(topLearnedRule.support)}, confianca=${fmt(topLearnedRule.confidence)}, lift=${fmt(topLearnedRule.lift)}.`
-      : learnedRuleCount
-      ? `Foram incorporadas ${learnedRuleCount} regras de associação aprendidas do dataset ao programa linear, independentemente da consulta atual.`
-      : "Nenhuma regra de associação aprendida atingiu os limiares de suporte, confiança e lift para entrar no programa linear.";
+      : `A consulta ${eventLabel(result.conditions)} -> ${eventLabel([result.target])} nao foi gerada pelo Apriori. O intervalo e inferido com as restricoes globais, sem fabricar uma regra para preencher os cards.`;
+    const ruleLabel = releasedRule ? "Regra Apriori" : "Consulta sem regra Apriori";
+    const learnedRuleCount = result.aprioriMining?.ruleCount || 0;
     const learnedRuleRows = (result.learnedAssociationRules || []).map((rule, index) => {
       return [
         `<tr>`,
@@ -424,30 +372,28 @@ async function runQuery() {
     });
     const learnedRuleContent = learnedRuleCount
       ? [
-          `<div>Foram incorporadas ${learnedRuleCount} regras de associacao aprendidas do dataset ao programa linear, independentemente da consulta atual.</div>`,
-          `<table class="learned-rules-table"><thead><tr><th>#</th><th>Regra aprendida</th><th>Suporte</th><th>Confianca</th><th>Lift</th></tr></thead><tbody>`,
+          `<div>O Apriori gerou ${learnedRuleCount} regras e todas foram incorporadas ao programa linear. A tabela mostra apenas a pre-visualizacao devolvida pela API.</div>`,
+          `<table class="learned-rules-table"><thead><tr><th>#</th><th>Regra Apriori</th><th>Suporte</th><th>Confianca</th><th>Lift descritivo</th></tr></thead><tbody>`,
           learnedRuleRows.join(""),
           `</tbody></table>`,
         ].join("")
-      : learnedRulePreview;
+      : "Nenhuma regra Apriori foi gerada com o suporte minimo configurado.";
     probabilityText.innerHTML = [
       zeroResultNotice,
       releasedRuleNotice,
-      `<div><strong>Metricas dos cards:</strong> suporte, confianca e lift aparecem quando a regra consultada tem ocorrencias empiricas; as regras globais aprendidas aparecem separadas na tabela abaixo.</div>`,
+      `<div><strong>Uso correto das medidas:</strong> suporte e confianca alimentam restricoes; lift fica somente como descricao da associacao.</div>`,
       `<div><strong>${ruleLabel}:</strong> se ${eventLabel(result.conditions)}, entao ${eventLabel([result.target])}.</div>`,
       ruleMetricContent,
       queriedRuleContent,
-      `<div class="learned-rules-block"><strong>Regras aprendidas no PL:</strong> ${learnedRuleContent}</div>`,
-      `<div><strong>Evidencias empiricas usadas no PL:</strong> P(A)=${fmt(result.pA)}, P(B)=${fmt(result.pB)} e P(A e B)=${fmt(result.pAB)}.</div>`,
+      `<div class="learned-rules-block"><strong>Regras Apriori no PL:</strong> ${learnedRuleContent}</div>`,
+      `<div><strong>Auditoria empirica da consulta:</strong> P(A)=${fmt(result.pA)}, P(B)=${fmt(result.pB)} e P(A e B)=${fmt(result.pAB)}. O valor conjunto da consulta nao e injetado como resposta pronta.</div>`,
       linearInterval,
       `<div><strong>Conclusao:</strong> ${conclusionContent}</div>`,
     ].join("");
     linearProgram.textContent = result.linearProgram;
-    renderClassificationMetrics(result.classification);
     renderMathModel(result);
   } catch (error) {
     probabilityText.innerHTML = `<div><strong>Erro:</strong> ${error.message}</div>`;
-    classificationMetrics.innerHTML = "";
     linearProgram.textContent = "";
     mathModel.innerHTML = "";
   } finally {
