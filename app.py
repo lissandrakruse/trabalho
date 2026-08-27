@@ -43,9 +43,9 @@ SOLVER_ENGINES = [
         "name": "SciPy HiGHS",
         "method": "highs",
         "engine": "scipy.optimize.linprog(method='highs')",
-        "status": "Executado no projeto principal e no script separado",
+        "status": "Executado na comparacao pelo script separado",
         "comparison": "Comparacao numerica ativa com os parametros da interface",
-        "notes": "Escolha automatica do HiGHS para LP apos Charnes-Cooper.",
+        "notes": "Escolha automatica do HiGHS usada como referencia comparativa.",
     },
     {
         "id": "highs-ds",
@@ -61,7 +61,7 @@ SOLVER_ENGINES = [
         "name": "HiGHS Interior Point",
         "method": "highs-ipm",
         "engine": "scipy.optimize.linprog(method='highs-ipm')",
-        "status": "Executado no script separado",
+        "status": "Executado no projeto principal e no script separado",
         "comparison": "Comparacao de metricas contra a mesma consulta da interface",
         "notes": "Usa o metodo de pontos interiores do HiGHS.",
     },
@@ -498,13 +498,37 @@ def build_linear_constraints(
         attribute: sorted({row[attribute] for row in rows})
         for attribute in attributes
     }
+    mask_cache: dict[tuple[tuple[str, str], ...], dict[int, float]] = {}
+    probability_cache: dict[tuple[tuple[str, str], ...], float] = {}
+    total_weight = sum(int(world.get("count", 1)) for world in worlds)
+
+    def cached_sparse_mask(conditions: list[dict[str, str]]) -> dict[int, float]:
+        signature = condition_signature(conditions)
+        mask = mask_cache.get(signature)
+        if mask is None:
+            mask = sparse_world_mask(worlds, conditions)
+            mask_cache[signature] = mask
+        return mask
+
+    def weighted_probability(conditions: list[dict[str, str]]) -> float:
+        signature = condition_signature(conditions)
+        cached = probability_cache.get(signature)
+        if cached is not None:
+            return cached
+        mask = cached_sparse_mask(conditions)
+        value = (
+            sum(int(worlds[index].get("count", 1)) for index in mask)
+            / total_weight
+        )
+        probability_cache[signature] = value
+        return value
 
     def add_interval(kind: str, conditions: list[dict[str, str]], value: float) -> bool:
         signature = condition_signature(conditions)
         if signature in interval_events:
             return False
         interval_events.add(signature)
-        mask = sparse_world_mask(worlds, conditions)
+        mask = cached_sparse_mask(conditions)
         lower, upper = rounded_interval(value)
         a_ub.append(mask)
         b_ub.append(upper)
@@ -540,8 +564,8 @@ def build_linear_constraints(
         )
         confidence = rule["confidence"]
         lower, upper = rounded_interval(confidence)
-        antecedent_mask = sparse_world_mask(worlds, antecedent)
-        both_mask = sparse_world_mask(worlds, both)
+        antecedent_mask = cached_sparse_mask(antecedent)
+        both_mask = cached_sparse_mask(both)
         a_ub.append(add_sparse_vectors(both_mask, antecedent_mask, -upper))
         b_ub.append(0.0)
         negative_both = {index: -value for index, value in both_mask.items()}
@@ -572,7 +596,7 @@ def build_linear_constraints(
             # Probabilidades marginais de cada valor de cada variavel:
             # P(N=alto), P(label=banana), P(ph=alcalino), etc.
             conditions = [{"attribute": attribute, "value": value}]
-            add_interval("marginal", conditions, probability(rows, conditions))
+            add_interval("marginal", conditions, weighted_probability(conditions))
 
     for index, left_attribute in enumerate(attributes):
         for right_attribute in attributes[index + 1 :]:
@@ -584,7 +608,7 @@ def build_linear_constraints(
                         {"attribute": left_attribute, "value": left_value},
                         {"attribute": right_attribute, "value": right_value},
                     ]
-                    add_interval("pairwise_joint", conditions, probability(rows, conditions))
+                    add_interval("pairwise_joint", conditions, weighted_probability(conditions))
 
     learned_rules = list(learned_association_rules())
     for rule in learned_rules:
@@ -597,13 +621,21 @@ def build_linear_constraints(
     return a_ub, b_ub, records
 
 
+@lru_cache(maxsize=1)
+def cached_linear_constraint_model(
+) -> tuple[list[dict[int, float]], list[float], list[dict[str, Any]]]:
+    """Build the dataset-wide constraints once per server process."""
+    data = load_dataset()
+    return build_linear_constraints(data["worlds"], data["rows"], {}, [])
+
+
 def solve_linear_interval(
     worlds: list[dict[str, Any]],
     rows: list[dict[str, str]],
     target: dict[str, str],
     base: list[dict[str, str]],
-    solver_method: str = "highs",
-    solver_name: str = "SciPy HiGHS",
+    solver_method: str = "highs-ipm",
+    solver_name: str = "SciPy HiGHS Interior Point",
 ) -> dict[str, Any]:
     # Itens 1c, 1d e 1e: resolver a pergunta do usuario.
     # A interface escolhe A e B; o objetivo matematico e minimizar e maximizar
@@ -650,7 +682,7 @@ def solve_linear_interval(
         return {"ok": False, "error": f"scipy indisponivel: {error}"}
 
     n = len(worlds)
-    a_ub, b_ub, records = build_linear_constraints(worlds, rows, target, base)
+    a_ub, b_ub, records = cached_linear_constraint_model()
 
     denominator_mask = world_mask(worlds, base)
     numerator_mask = world_mask(worlds, both)
@@ -808,7 +840,7 @@ def full_linear_program_text(
     base: list[dict[str, str]],
     lp: dict[str, Any],
 ) -> str:
-    _, _, records = build_linear_constraints(worlds, rows, target, base)
+    _, _, records = cached_linear_constraint_model()
     both = [*base, target]
     attributes = list(rows[0].keys())
     domains = {
@@ -1094,8 +1126,8 @@ def metadata():
 
 def compute_query(
     payload: dict[str, Any],
-    solver_method: str = "highs",
-    solver_name: str = "SciPy HiGHS",
+    solver_method: str = "highs-ipm",
+    solver_name: str = "SciPy HiGHS Interior Point",
 ) -> dict[str, Any]:
     # Ponto central chamado pelo botao "Consultar".
     # Ele valida A e B, calcula probabilidades empiricas, minera/seleciona

@@ -7,6 +7,7 @@ import math
 import sys
 import time
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -130,6 +131,7 @@ def load_dataset(path: Path) -> dict[str, Any]:
         max_itemset_size=APRIORI_MAX_ITEMSET_SIZE,
     )
     return {
+        "datasetPath": str(path.resolve()),
         "attributes": attributes,
         "numericAttributes": numeric_attributes,
         "categoricalAttributes": categorical_attributes,
@@ -300,6 +302,30 @@ def build_linear_constraints(
         "aprioriRules": 0,
     }
     interval_events: set[tuple[tuple[str, str], ...]] = set()
+    mask_cache: dict[tuple[tuple[str, str], ...], dict[int, float]] = {}
+    probability_cache: dict[tuple[tuple[str, str], ...], float] = {}
+    total_weight = sum(int(world.get("count", 1)) for world in worlds)
+
+    def cached_sparse_mask(conditions: list[dict[str, str]]) -> dict[int, float]:
+        signature = condition_signature(conditions)
+        mask = mask_cache.get(signature)
+        if mask is None:
+            mask = sparse_world_mask(worlds, conditions)
+            mask_cache[signature] = mask
+        return mask
+
+    def weighted_probability(conditions: list[dict[str, str]]) -> float:
+        signature = condition_signature(conditions)
+        cached = probability_cache.get(signature)
+        if cached is not None:
+            return cached
+        mask = cached_sparse_mask(conditions)
+        value = (
+            sum(int(worlds[index].get("count", 1)) for index in mask)
+            / total_weight
+        )
+        probability_cache[signature] = value
+        return value
 
     def add_interval(kind: str, conditions: list[dict[str, str]], value: float) -> bool:
         signature = condition_signature(conditions)
@@ -307,7 +333,7 @@ def build_linear_constraints(
             return False
         interval_events.add(signature)
         lower, upper = rounded_interval(value)
-        mask = sparse_world_mask(worlds, conditions)
+        mask = cached_sparse_mask(conditions)
         a_ub.append(mask)
         b_ub.append(upper)
         a_ub.append({index: -value for index, value in mask.items()})
@@ -323,8 +349,8 @@ def build_linear_constraints(
         both = [*antecedent, *consequent]
         add_interval("aprioriRuleSupport", both, rule["support"])
         lower, upper = rounded_interval(rule["confidence"])
-        antecedent_mask = sparse_world_mask(worlds, antecedent)
-        both_mask = sparse_world_mask(worlds, both)
+        antecedent_mask = cached_sparse_mask(antecedent)
+        both_mask = cached_sparse_mask(both)
         a_ub.append(add_sparse_vectors(both_mask, antecedent_mask, -upper))
         b_ub.append(0.0)
         negative_both = {index: -value for index, value in both_mask.items()}
@@ -335,7 +361,7 @@ def build_linear_constraints(
     for attribute in data["attributes"]:
         for value in data["domains"][attribute]:
             conditions = [{"attribute": attribute, "value": value}]
-            add_interval("marginal", conditions, probability(rows, conditions))
+            add_interval("marginal", conditions, weighted_probability(conditions))
 
     for index, left_attribute in enumerate(data["attributes"]):
         for right_attribute in data["attributes"][index + 1 :]:
@@ -345,7 +371,7 @@ def build_linear_constraints(
                         {"attribute": left_attribute, "value": left_value},
                         {"attribute": right_attribute, "value": right_value},
                     ]
-                    add_interval("pairwiseJoint", conditions, probability(rows, conditions))
+                    add_interval("pairwiseJoint", conditions, weighted_probability(conditions))
 
     learned_rules = mine_association_rules(data)
     for rule in learned_rules:
@@ -355,12 +381,19 @@ def build_linear_constraints(
     return a_ub, b_ub, summary
 
 
+@lru_cache(maxsize=1)
+def cached_linear_constraint_model(
+) -> tuple[list[dict[int, float]], list[float], dict[str, int]]:
+    data = load_dataset(DEFAULT_DATASET)
+    return build_linear_constraints(data, {}, [])
+
+
 def solve_linear_interval(
     data: dict[str, Any],
     target: dict[str, str],
     base: list[dict[str, str]],
-    solver_method: str = "highs",
-    solver_name: str = "SciPy HiGHS",
+    solver_method: str = "highs-ipm",
+    solver_name: str = "SciPy HiGHS Interior Point",
 ) -> dict[str, Any]:
     # Resolve dois LPs: um minimiza e outro maximiza P(A | B). A razao e
     # linearizada por Charnes-Cooper antes da chamada ao scipy.optimize.linprog.
@@ -387,7 +420,10 @@ def solve_linear_interval(
         return {"ok": False, "error": f"scipy indisponivel: {error}"}
 
     n = len(worlds)
-    a_ub, b_ub, summary = build_linear_constraints(data, target, base)
+    if data.get("datasetPath") == str(DEFAULT_DATASET.resolve()):
+        a_ub, b_ub, summary = cached_linear_constraint_model()
+    else:
+        a_ub, b_ub, summary = build_linear_constraints(data, target, base)
 
     both = [*base, target]
 
@@ -654,7 +690,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--solver-method",
         choices=[engine["method"] for engine in SOLVER_ENGINES],
-        default="highs",
+        default="highs-ipm",
         help="Metodo do SciPy/HiGHS: highs, highs-ds ou highs-ipm.",
     )
     parser.add_argument("--show-domains", action="store_true", help="Mostra atributos e valores validos.")

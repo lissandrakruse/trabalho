@@ -121,9 +121,13 @@ min P(A | B)
 max P(A | B)
 ```
 
-O solver principal é `scipy.optimize.linprog` com HiGHS. A matriz de restrições
-é esparsa para comportar todas as regras Apriori sem consumo excessivo de
-memória. A comparação também executa `highs-ds` e `highs-ipm`.
+O solver principal é `scipy.optimize.linprog` com o método `highs-ipm` do
+HiGHS. A matriz de restrições é esparsa para comportar todas as regras Apriori
+sem consumo excessivo de memória. As máscaras de eventos são reutilizadas e o
+sistema global de restrições fica em cache por processo, pois ele depende do
+dataset e não da consulta escolhida. Essa otimização reduz o tempo de resposta
+no Render sem remover nenhuma das 5.312 regras. A comparação também executa
+`highs`, `highs-ds` e `highs-ipm`.
 
 ## Interface do usuário
 
