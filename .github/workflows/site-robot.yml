@@ -1,0 +1,53 @@
+name: Robo de teste do site
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: Endereco do site que sera testado
+        required: true
+        default: https://trabalho-bh30.onrender.com/
+      quick:
+        description: Ignorar a geracao do TXT e do PDF
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  test-public-site:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Baixar o projeto
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Instalar dependencias do projeto
+        run: python -m pip install -r requirements.txt
+
+      - name: Executar testes unitarios
+        run: python -m unittest discover -s tests -v
+
+      - name: Executar robo no Render
+        shell: bash
+        run: |
+          ARGS=(--base-url "${{ inputs.base_url }}" --output artifacts/robot-test-report.json)
+          if [[ "${{ inputs.quick }}" == "true" ]]; then
+            ARGS+=(--quick)
+          fi
+          python scripts/site_robot.py "${ARGS[@]}"
+
+      - name: Guardar relatorio de evidencias
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: relatorio-robo-site
+          path: artifacts/robot-test-report.json
+          if-no-files-found: warn
