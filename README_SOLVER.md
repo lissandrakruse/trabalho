@@ -129,6 +129,25 @@ dataset e não da consulta escolhida. Essa otimização reduz o tempo de respost
 no Render sem remover nenhuma das 5.312 regras. A comparação também executa
 `highs`, `highs-ds` e `highs-ipm`.
 
+### 8. Resumo didático e TXT numérico auditável
+
+O painel da interface é identificado como **formulação matemática resumida**.
+Expressões como `sum_w x_w` explicam o modelo, mas não são apresentadas como se
+fossem a entrada literal do solver.
+
+O botão de exportação gera um TXT diferente, construído pelo mesmo objeto usado
+na chamada de `scipy.optimize.linprog`. O arquivo contém:
+
+- mapeamento das `n` variáveis de mundos `y_w` e da variável de escala `t`;
+- os vetores `c_lower` e `c_upper_as_min` realmente minimizados;
+- todas as entradas não nulas de `A_ub`, `b_ub`, `A_eq` e `b_eq`;
+- limites de cada variável e a origem de cada linha de desigualdade;
+- SHA-256 canônico do modelo, repetido no resultado do solver e no TXT.
+
+Assim, com 466 mundos, a matriz entregue ao solver possui 467 variáveis após
+Charnes–Cooper (`466 y_w + t`). O digest impede que uma formulação diferente
+seja exportada silenciosamente: se os modelos divergirem, a geração falha.
+
 ## Interface do usuário
 
 A página permite:
@@ -139,7 +158,8 @@ A página permite:
 - ver o diagnóstico empírico sem confundi-lo com a formulação;
 - identificar se `B -> A` foi realmente gerada pelo Apriori;
 - visualizar uma prévia das regras usadas no programa linear;
-- gerar o LP completo, PDFs e comparação de solvers.
+- consultar o resumo didático e exportar o modelo numérico auditável em TXT;
+- gerar PDFs e comparação de solvers.
 
 Não há painel de acurácia, precisão, recall ou F1, porque o exercício modela
 restrições probabilísticas, não avaliação de um classificador.

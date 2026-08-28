@@ -68,6 +68,44 @@ class LinearConstraintsTest(unittest.TestCase):
         self.assertIsNone(missing)
         self.assertIs(present, self.rule)
 
+    def test_auditable_txt_uses_the_exact_model_solved_by_linprog(self) -> None:
+        target = {"attribute": "A", "value": "sim"}
+        base = [{"attribute": "B", "value": "sim"}]
+        with patch("app.learned_association_rules", return_value=(self.rule,)):
+            constraints = app.build_linear_constraints(
+                self.worlds,
+                self.rows,
+                target=target,
+                base=base,
+            )
+
+        with (
+            patch("app.cached_linear_constraint_model", return_value=constraints),
+            patch("app.learned_association_rules", return_value=(self.rule,)),
+        ):
+            result = app.solve_linear_interval(self.worlds, self.rows, target, base)
+            exported = app.full_linear_program_text(
+                self.worlds,
+                self.rows,
+                target,
+                base,
+                result,
+            )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["worldVariables"], 4)
+        self.assertEqual(result["solverVariables"], 5)
+        self.assertIn(result["modelDigest"], exported)
+        self.assertIn("c_lower=", exported)
+        self.assertIn("c_upper_as_min=", exported)
+        self.assertIn("A_ub[0]=", exported)
+        self.assertIn("b_ub[0]=", exported)
+        self.assertIn("A_eq[0]=", exported)
+        self.assertIn("b_eq[0]=", exported)
+        self.assertIn("bounds[0:y_0001]", exported)
+        self.assertNotIn("soma(x_w)", exported)
+        self.assertNotIn("soma(x_w onde", exported)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import csv
+import hashlib
+import json
 import math
 import os
 import time
@@ -530,6 +532,7 @@ def build_linear_constraints(
         interval_events.add(signature)
         mask = cached_sparse_mask(conditions)
         lower, upper = rounded_interval(value)
+        row_indexes = [len(a_ub), len(a_ub) + 1]
         a_ub.append(mask)
         b_ub.append(upper)
         a_ub.append({index: -value for index, value in mask.items()})
@@ -542,6 +545,7 @@ def build_linear_constraints(
                 "upper": upper,
                 "value": value,
                 "expression": mask_expression(conditions),
+                "rowIndexes": row_indexes,
             }
         )
         return True
@@ -566,6 +570,7 @@ def build_linear_constraints(
         lower, upper = rounded_interval(confidence)
         antecedent_mask = cached_sparse_mask(antecedent)
         both_mask = cached_sparse_mask(both)
+        confidence_row_indexes = [len(a_ub), len(a_ub) + 1]
         a_ub.append(add_sparse_vectors(both_mask, antecedent_mask, -upper))
         b_ub.append(0.0)
         negative_both = {index: -value for index, value in both_mask.items()}
@@ -584,6 +589,7 @@ def build_linear_constraints(
                 "source": "saida do algoritmo Apriori",
                 "supportConstraintAdded": support_constraint_added,
                 "liftUsage": "descritivo; nao usado como restricao nem acuracia",
+                "rowIndexes": confidence_row_indexes,
                 "expression": (
                     f"{lower:.3f} <= {mask_expression(both)} / "
                     f"{mask_expression(antecedent)} <= {upper:.3f}"
@@ -629,6 +635,117 @@ def cached_linear_constraint_model(
     return build_linear_constraints(data["worlds"], data["rows"], {}, [])
 
 
+def _canonical_sparse_rows(rows: list[dict[int, float]]) -> list[list[list[float | int]]]:
+    """Return a deterministic coordinate representation for hashing/export."""
+    return [
+        [[column, float(value)] for column, value in sorted(row.items())]
+        for row in rows
+    ]
+
+
+def _constraint_sources(
+    records: list[dict[str, Any]],
+    row_count: int,
+) -> list[dict[str, Any]]:
+    """Map every numeric A_ub row back to the evidence that created it."""
+    sources: list[dict[str, Any]] = [
+        {"kind": "dataset_constraint", "side": "unknown", "description": "restricao global"}
+        for _ in range(row_count)
+    ]
+    for record in records:
+        row_indexes = record.get("rowIndexes", [])
+        if "conditions" in record:
+            description = event_key(record["conditions"])
+        else:
+            description = (
+                f"{event_key(record.get('antecedent', []))} -> "
+                f"{event_key(record.get('consequent', []))}"
+            )
+        for position, row_index in enumerate(row_indexes):
+            if 0 <= row_index < row_count:
+                sources[row_index] = {
+                    "kind": record["kind"],
+                    "side": "upper" if position == 0 else "lower",
+                    "description": description,
+                }
+    return sources
+
+
+def build_transformed_linear_program(
+    worlds: list[dict[str, Any]],
+    rows: list[dict[str, str]],
+    target: dict[str, str],
+    base: list[dict[str, str]],
+) -> dict[str, Any]:
+    """Build the exact Charnes-Cooper model consumed by ``linprog``.
+
+    The returned sparse rows, right-hand sides, objectives and bounds are the
+    single source of truth for both optimization and the auditable TXT export.
+    """
+    del rows  # Constraints are dataset-wide and already cached from this dataset.
+    n_worlds = len(worlds)
+    t_index = n_worlds
+    a_ub, b_ub, records = cached_linear_constraint_model()
+    both = [*base, target]
+    denominator_mask = sparse_world_mask(worlds, base)
+    numerator_mask = sparse_world_mask(worlds, both)
+
+    transformed_a_ub: list[dict[int, float]] = []
+    for row, limit in zip(a_ub, b_ub):
+        transformed = dict(row)
+        if abs(limit) > 1e-15:
+            transformed[t_index] = -float(limit)
+        transformed_a_ub.append(transformed)
+
+    transformed_a_eq = [
+        {**{index: 1.0 for index in range(n_worlds)}, t_index: -1.0},
+        dict(denominator_mask),
+    ]
+    objective_lower = dict(numerator_mask)
+    objective_upper_as_min = {index: -value for index, value in numerator_mask.items()}
+    variable_names = [f"y_{index + 1:04d}" for index in range(n_worlds)] + ["t"]
+    bounds: list[tuple[float, None]] = [(0.0, None)] * (n_worlds + 1)
+
+    digest_payload = {
+        "query": {"target": target, "base": base},
+        "worlds": [
+            {"values": world["values"], "count": int(world.get("count", 1))}
+            for world in worlds
+        ],
+        "variableNames": variable_names,
+        "objectiveLower": _canonical_sparse_rows([objective_lower])[0],
+        "objectiveUpperAsMin": _canonical_sparse_rows([objective_upper_as_min])[0],
+        "aUb": _canonical_sparse_rows(transformed_a_ub),
+        "bUb": [0.0] * len(transformed_a_ub),
+        "aEq": _canonical_sparse_rows(transformed_a_eq),
+        "bEq": [0.0, 1.0],
+        "bounds": [[0.0, None] for _ in bounds],
+    }
+    canonical = json.dumps(
+        digest_payload,
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+
+    return {
+        "worldVariables": n_worlds,
+        "solverVariables": n_worlds + 1,
+        "tIndex": t_index,
+        "variableNames": variable_names,
+        "objectiveLower": objective_lower,
+        "objectiveUpperAsMin": objective_upper_as_min,
+        "aUb": transformed_a_ub,
+        "bUb": [0.0] * len(transformed_a_ub),
+        "aEq": transformed_a_eq,
+        "bEq": [0.0, 1.0],
+        "bounds": bounds,
+        "rowSources": _constraint_sources(records, len(transformed_a_ub)),
+        "records": records,
+        "digest": hashlib.sha256(canonical).hexdigest(),
+    }
+
+
 def solve_linear_interval(
     worlds: list[dict[str, Any]],
     rows: list[dict[str, str]],
@@ -654,78 +771,48 @@ def solve_linear_interval(
             "baseCount": denominator_count,
         }
 
-    both = [*base, target]
-    if not any(matches(world["values"], both) for world in worlds):
-        return {
-            "ok": True,
-            "lower": 0.0,
-            "upper": 0.0,
-            "variables": len(worlds),
-            "constraints": 0,
-            "baseConstraints": 0,
-            "constraintSummary": {
-                "marginal": 0,
-                "pairwiseJoint": 0,
-                "aprioriRuleSupport": 0,
-                "aprioriRuleConfidence": 0,
-                "aprioriRules": 0,
-            },
-            "solver": "atalho empirico: nenhum mundo observado satisfaz A e B",
-            "solverMethod": "empirical-zero",
-            "solverName": "Atalho empirico",
-        }
-
     try:
         from scipy.optimize import linprog
-        from scipy.sparse import coo_matrix, csr_matrix, hstack
+        from scipy.sparse import coo_matrix
     except Exception as error:
         return {"ok": False, "error": f"scipy indisponivel: {error}"}
 
-    n = len(worlds)
-    a_ub, b_ub, records = cached_linear_constraint_model()
+    model = build_transformed_linear_program(worlds, rows, target, base)
+    variable_count = model["solverVariables"]
 
-    denominator_mask = world_mask(worlds, base)
-    numerator_mask = world_mask(worlds, both)
+    def sparse_matrix(sparse_rows: list[dict[int, float]]) -> Any:
+        values: list[float] = []
+        row_indexes: list[int] = []
+        column_indexes: list[int] = []
+        for row_index, row in enumerate(sparse_rows):
+            for column_index, value in row.items():
+                row_indexes.append(row_index)
+                column_indexes.append(column_index)
+                values.append(value)
+        return coo_matrix(
+            (values, (row_indexes, column_indexes)),
+            shape=(len(sparse_rows), variable_count),
+        ).tocsr()
 
-    # Charnes-Cooper: x = y / t. A razao condicional vira um objetivo linear
-    # porque fixamos P(B) em y como denominator_mask . y = 1.
-    sparse_values: list[float] = []
-    sparse_rows: list[int] = []
-    sparse_columns: list[int] = []
-    for row_index, row in enumerate(a_ub):
-        for column_index, value in row.items():
-            sparse_rows.append(row_index)
-            sparse_columns.append(column_index)
-            sparse_values.append(value)
-    base_matrix = coo_matrix(
-        (sparse_values, (sparse_rows, sparse_columns)),
-        shape=(len(a_ub), n),
-    ).tocsr()
-    limit_column = csr_matrix([[-limit] for limit in b_ub])
-    transformed_a_ub = hstack([base_matrix, limit_column], format="csr")
-    transformed_b_ub = [0.0] * len(a_ub)
-    transformed_a_eq = csr_matrix(
-        [
-            [*([1.0] * n), -1.0],
-            [*denominator_mask, 0.0],
-        ]
-    )
-    transformed_b_eq = [0.0, 1.0]
-    transformed_bounds = [(0.0, None)] * (n + 1)
+    transformed_a_ub = sparse_matrix(model["aUb"])
+    transformed_a_eq = sparse_matrix(model["aEq"])
 
-    def optimize(objective: list[float]) -> Any:
+    def dense_objective(sparse_objective: dict[int, float]) -> list[float]:
+        return [sparse_objective.get(index, 0.0) for index in range(variable_count)]
+
+    def optimize(sparse_objective: dict[int, float]) -> Any:
         return linprog(
-            c=objective,
+            c=dense_objective(sparse_objective),
             A_ub=transformed_a_ub,
-            b_ub=transformed_b_ub,
+            b_ub=model["bUb"],
             A_eq=transformed_a_eq,
-            b_eq=transformed_b_eq,
-            bounds=transformed_bounds,
+            b_eq=model["bEq"],
+            bounds=model["bounds"],
             method=solver_method,
         )
 
-    lower_result = optimize([*numerator_mask, 0.0])
-    upper_result = optimize([-item for item in [*numerator_mask, 0.0]])
+    lower_result = optimize(model["objectiveLower"])
+    upper_result = optimize(model["objectiveUpperAsMin"])
     if not lower_result.success or not upper_result.success:
         return {
             "ok": False,
@@ -734,14 +821,17 @@ def solve_linear_interval(
 
     lower_hi = clean_probability(float(lower_result.fun))
     upper_lo = clean_probability(float(-upper_result.fun))
+    records = model["records"]
 
     return {
         "ok": True,
         "lower": lower_hi,
         "upper": upper_lo,
-        "variables": n,
+        "variables": model["solverVariables"],
+        "worldVariables": model["worldVariables"],
+        "solverVariables": model["solverVariables"],
         "constraints": transformed_a_ub.shape[0] + transformed_a_eq.shape[0],
-        "baseConstraints": len(a_ub),
+        "baseConstraints": len(model["aUb"]),
         "constraintSummary": {
             "marginal": sum(1 for item in records if item["kind"] == "marginal"),
             "pairwiseJoint": sum(1 for item in records if item["kind"] == "pairwise_joint"),
@@ -752,6 +842,7 @@ def solve_linear_interval(
         "solver": f"scipy.optimize.linprog {solver_method}",
         "solverMethod": solver_method,
         "solverName": solver_name,
+        "modelDigest": model["digest"],
     }
 
 
@@ -763,10 +854,10 @@ def linear_program_text(
     p_ab: float,
     lp: dict[str, Any],
 ) -> str:
-    numerator = f"soma(x_w onde {event_key([*base, target])})"
-    denominator = f"soma(x_w onde {event_key(base)})"
     lines = [
-        "MODELO MATEMATICO DA CONSULTA",
+        "FORMULACAO MATEMATICA RESUMIDA DA CONSULTA",
+        "Esta e uma explicacao didatica; nao e a matriz numerica enviada ao solver.",
+        "Use o TXT auditavel para consultar A_ub, b_ub, A_eq, b_eq, objetivos e limites exatos.",
         "",
         "1. Eventos da consulta:",
         f"  A = {event_key([target])}",
@@ -813,8 +904,10 @@ def linear_program_text(
             [
                 "",
                 f"Solver: {lp['solver']}",
-                f"Variaveis: {lp['variables']}",
+                f"Variaveis de mundos: {lp.get('worldVariables', lp['variables'])}",
+                f"Variaveis enviadas ao solver (y_w e t): {lp.get('solverVariables', lp['variables'])}",
                 f"Restricoes: {lp['constraints']}",
+                f"SHA-256 do modelo numerico: {lp.get('modelDigest', '-')}",
                 f"Resumo: {lp.get('constraintSummary', {})}",
                 f"Intervalo retornado: {fmt_probability(lp['lower'])} <= P(A | B) <= {fmt_probability(lp['upper'])}",
             ]
@@ -840,190 +933,148 @@ def full_linear_program_text(
     base: list[dict[str, str]],
     lp: dict[str, Any],
 ) -> str:
-    _, _, records = cached_linear_constraint_model()
-    both = [*base, target]
-    attributes = list(rows[0].keys())
-    domains = {
-        attribute: sorted({row[attribute] for row in rows})
-        for attribute in attributes
-    }
-    target_attribute = target["attribute"]
-    target_values = domains.get(target_attribute, [target["value"]])
+    model = build_transformed_linear_program(worlds, rows, target, base)
+    solver_digest = lp.get("modelDigest")
+    if solver_digest and solver_digest != model["digest"]:
+        raise RuntimeError(
+            "O modelo reconstruido para exportacao difere daquele resolvido pelo solver."
+        )
+
+    def exact_number(value: float) -> str:
+        if abs(value) <= 1e-15:
+            return "0"
+        return format(float(value), ".17g")
+
+    def sparse_row(row: dict[int, float]) -> str:
+        if not row:
+            return "{}"
+        entries = []
+        for column, value in sorted(row.items()):
+            entries.append(
+                f"{column}:{model['variableNames'][column]}:{exact_number(value)}"
+            )
+        return "{" + ";".join(entries) + "}"
+
     lines = [
-        "PROGRAMA LINEAR COMPLETO DA CONSULTA",
+        "PROGRAMA LINEAR NUMERICO AUDITAVEL",
         "",
-        f"Consulta: P({event_key([target])} | {event_key(base)})",
-        f"Mundos possiveis observados: {len(worlds)}",
+        "Este TXT e gerado a partir do mesmo objeto numerico convertido em matrizes CSR",
+        "e entregue a scipy.optimize.linprog. Nao e uma formula resumida ou ilustrativa.",
+        "Indices de linhas e colunas abaixo comecam em zero, como no codigo Python.",
         "",
-        "LEITURA DO PROJETO",
+        "IDENTIFICACAO",
+        f"consulta=P({event_key([target])} | {event_key(base)})",
+        f"solver={lp.get('solver', 'scipy.optimize.linprog highs-ipm')}",
+        f"sha256_modelo={model['digest']}",
+        f"sha256_confirmado_pelo_solver={solver_digest or model['digest']}",
+        f"mundos={model['worldVariables']}",
+        f"variaveis_solver={model['solverVariables']}",
+        f"linhas_A_ub={len(model['aUb'])}",
+        f"linhas_A_eq={len(model['aEq'])}",
+        f"restricoes_totais={len(model['aUb']) + len(model['aEq'])}",
         "",
-        "1. O dataset e categorizado para permitir consultas logicas sobre atributos e valores.",
-        "2. Cada combinacao observada vira um mundo possivel com uma variavel x_w.",
-        "3. Marginais e conjuntas por pares viram restricoes intervalares do programa linear.",
-        "4. O Apriori minera Omega e fornece suporte/confianca para novas restricoes lineares.",
-        "5. A consulta P(A | B) e resolvida por Charnes-Cooper e HiGHS.",
+        "FORMATO DAS LINHAS ESPARSAS",
+        "{coluna:nome_variavel:coeficiente;...}",
+        "A_ub[i] usa <= b_ub[i]; A_eq[i] usa = b_eq[i].",
         "",
-        "Variaveis originais:",
-        "  x_w >= 0 para cada mundo possivel w",
-        "  soma_w x_w = 1",
-        "",
-        "Objetivo fracionario:",
-        f"  P(A | B) = {mask_expression(both)} / {mask_expression(base)}",
-        "",
-        "Transformacao de Charnes-Cooper usada pelo solver:",
-        "  x_w = y_w / t",
-        f"  {mask_expression(base).replace('x_w', 'y_w')} = 1",
-        "  soma_w y_w - t = 0",
-        "  cada restricao a.x <= b vira a.y - b.t <= 0",
-        "",
-        "Objetivos resolvidos:",
-        f"  minimizar {mask_expression(both).replace('x_w', 'y_w')}",
-        f"  maximizar {mask_expression(both).replace('x_w', 'y_w')}",
-        "",
-        "Resumo quantitativo:",
-        f"  Variaveis do solver apos Charnes-Cooper: {lp.get('variables', len(worlds)) + 1}",
-        f"  Restricoes lineares no solver: {lp.get('constraints', '-')}",
-        f"  Restricoes intervalares/Apriori antes da transformacao: {lp.get('baseConstraints', '-')}",
-        f"  Agrupamento: {lp.get('constraintSummary', {})}",
-        "",
-        "Observacao sobre P(A e B):",
-        "  A soma sempre lista todas as condicoes simultaneas que definem o evento.",
-        "  Se B possui duas afirmacoes e A possui uma, P(A e B) aparece com tres condicoes porque representa a intersecao completa.",
-        "  O valor empirico da consulta e mostrado para auditoria, mas P(A e B) nao e injetado como resposta pronta.",
-        "  O LP usa conjuntas de todos os pares e suportes/confiancas das regras geradas pelo Apriori.",
-        "",
-        "PROBABILIDADES EXPLICITAS DO EVENTO A",
-        "",
-        f"Atributo alvo da consulta: {target_attribute}",
-        "P(A) para cada valor possivel do atributo alvo:",
+        "MAPEAMENTO EXATO DAS VARIAVEIS",
     ]
-    for value in target_values:
-        candidate = [{"attribute": target_attribute, "value": value}]
-        lines.append(f"  P({event_key(candidate)}) = {probability(rows, candidate):.3f}")
-
-    lines.extend(
-        [
-            "",
-            "P(A e B) para cada valor possivel de A mantendo o mesmo B da consulta:",
-        ]
-    )
-    for value in target_values:
-        candidate = [{"attribute": target_attribute, "value": value}]
-        candidate_joint = [*base, *candidate]
-        lines.append(f"  P({event_key(candidate_joint)}) = {probability(rows, candidate_joint):.3f}")
-
-    mining = learned_association_mining()
-    learned_rules = list(mining["rules"])
-    lines.extend(
-        [
-            "",
-            "REGRAS DE ASSOCIACAO APRENDIDAS DO DATASET",
-            "",
-            (
-                "Estas regras nao dependem da consulta escolhida pelo usuario. "
-                "Elas sao geradas pelo Apriori sobre Omega; o programa linear usa "
-                "suporte e confianca como probabilidades das restricoes."
-            ),
-            (
-                f"Limiar usado: suporte >= {APRIORI_MIN_SUPPORT:.3f}, "
-                f"confianca >= {APRIORI_MIN_CONFIDENCE:.3f}; "
-                f"itemset maximo = {APRIORI_MAX_ITEMSET_SIZE}."
-            ),
-            f"Mundos observados em Omega: {mining['omegaWorlds']}",
-            f"Itemsets frequentes: {mining['frequentItemsets']}",
-            f"Total de regras Apriori incorporadas: {len(learned_rules)}",
-            "Lift e exibido apenas como diagnostico; nao filtra regras e nao entra no LP.",
-        ]
-    )
-    for index, rule in enumerate(learned_rules, start=1):
+    for column, world in enumerate(worlds):
+        values = json.dumps(world["values"], ensure_ascii=False, sort_keys=True)
         lines.append(
-            f"  {index}. {event_key(rule['antecedent'])} -> {event_key(rule['consequent'])} | "
-            f"suporte={rule['support']:.3f}, confianca={rule['confidence']:.3f}, lift={rule['lift']:.3f}"
+            f"col={column};var={model['variableNames'][column]};"
+            f"mundo=w_{column + 1:04d};contagem={int(world.get('count', 1))};"
+            f"valores={values};relacao_original=x_{column + 1:04d}=y_{column + 1:04d}/t"
+        )
+    lines.append(
+        f"col={model['tIndex']};var=t;descricao=escala de Charnes-Cooper;limite_inferior=0"
+    )
+
+    lines.extend(
+        [
+            "",
+            "OBJETIVOS EXATOS ENTREGUES AO LINPROG",
+            f"c_lower={sparse_row(model['objectiveLower'])}",
+            f"c_upper_as_min={sparse_row(model['objectiveUpperAsMin'])}",
+            "limite_inferior=fun(c_lower)",
+            "limite_superior=-fun(c_upper_as_min)",
+            "",
+            "DESIGUALDADES EXATAS",
+        ]
+    )
+    for row_index, (row, rhs, source) in enumerate(
+        zip(model["aUb"], model["bUb"], model["rowSources"])
+    ):
+        lines.append(
+            f"A_ub[{row_index}]={sparse_row(row)} <= "
+            f"b_ub[{row_index}]={exact_number(rhs)} | "
+            f"origem={source['kind']}:{source['side']}:{source['description']}"
+        )
+
+    lines.extend(["", "IGUALDADES EXATAS"])
+    equality_sources = [
+        "normalizacao_transformada: soma(y_w)-t=0",
+        f"denominador_transformado: evento B ({event_key(base)})=1",
+    ]
+    for row_index, (row, rhs, source) in enumerate(
+        zip(model["aEq"], model["bEq"], equality_sources)
+    ):
+        lines.append(
+            f"A_eq[{row_index}]={sparse_row(row)} = "
+            f"b_eq[{row_index}]={exact_number(rhs)} | origem={source}"
+        )
+
+    lines.extend(["", "LIMITES EXATOS DAS VARIAVEIS"])
+    for column, (lower, upper) in enumerate(model["bounds"]):
+        upper_text = "None" if upper is None else exact_number(upper)
+        lines.append(
+            f"bounds[{column}:{model['variableNames'][column]}]="
+            f"({exact_number(lower)},{upper_text})"
         )
 
     lines.extend(
         [
             "",
-            "REGRAS DE ASSOCIACAO LIGADAS A CONSULTA",
+            "CHAMADA REPRODUZIDA",
+            "linprog(c=c_lower, A_ub=A_ub, b_ub=b_ub, A_eq=A_eq, b_eq=b_eq, bounds=bounds, method=solver_method)",
+            "linprog(c=c_upper_as_min, A_ub=A_ub, b_ub=b_ub, A_eq=A_eq, b_eq=b_eq, bounds=bounds, method=solver_method)",
             "",
-            "Regra consultada B -> A:",
-            f"  {event_key(base)} -> {event_key([target])}",
+            "RESULTADO DO MESMO MODELO",
         ]
     )
+    if lp.get("ok"):
+        lines.extend(
+            [
+                f"limite_inferior={exact_number(lp['lower'])}",
+                f"limite_superior={exact_number(lp['upper'])}",
+                f"intervalo={fmt_probability(lp['lower'])} <= P(A | B) <= {fmt_probability(lp['upper'])}",
+            ]
+        )
+    else:
+        lines.append(f"status=nao_resolvido;motivo={lp.get('error', 'erro desconhecido')}")
+
+    learned_rules = list(learned_association_rules())
     released_rule = query_association_rule(learned_rules, base, [target])
+    lines.extend(["", "STATUS DA REGRA CONSULTADA"])
     if released_rule is None:
         lines.extend(
             [
-                "  Status: esta regra nao foi gerada pelo Apriori.",
-                "  Suporte, confianca e lift ficam sem valor como medidas de regra.",
-                "  A consulta continua sendo resolvida pelas restricoes globais do PL.",
+                "status=nao_se_aplica_como_regra_minerada",
+                "motivo=a regra B -> A nao foi gerada pelo Apriori com os parametros atuais",
+                "efeito=o intervalo do solver permanece valido e usa as restricoes globais",
             ]
         )
     else:
         lines.extend(
             [
-                "  Status: regra encontrada na saida do Apriori.",
-                f"  suporte={released_rule['support']:.3f}, confianca={released_rule['confidence']:.3f}, lift={released_rule['lift']:.3f}",
-                "  A confianca liberada vira restricao linear ativa.",
+                "status=regra_gerada_pelo_apriori",
+                f"suporte={exact_number(released_rule['support'])}",
+                f"confianca={exact_number(released_rule['confidence'])}",
+                f"lift_descritivo={exact_number(released_rule['lift'])}",
             ]
         )
-    lines.extend(
-        [
-            "",
-            "Diagnostico empirico B -> A para todos os valores possiveis do atributo alvo:",
-            "  Estes valores ajudam a auditar a base, mas nao substituem a saida da extracao de regras.",
-        ]
-    )
-    for value in target_values:
-        candidate = [{"attribute": target_attribute, "value": value}]
-        status = association_rule_status(rows, base, candidate)
-        lines.append(f"  {association_rule_description(rows, base, candidate)} | status={status['reason']}")
 
-    if len(base) > 1:
-        lines.extend(
-            [
-                "",
-                "Regras usando cada afirmacao individual de B contra o A selecionado:",
-            ]
-        )
-        for condition in base:
-            status = association_rule_status(rows, [condition], [target])
-            lines.append(f"  {association_rule_description(rows, [condition], [target])} | status={status['reason']}")
-
-    lines.extend(
-        [
-            "",
-            "RESTRICOES COMPLETAS",
-            "",
-        ]
-    )
-
-    grouped_titles = {
-        "marginal": "1. Probabilidades marginais",
-        "pairwise_joint": "2. Probabilidades conjuntas por pares de valores",
-        "apriori_rule_support": "3. Suportes de itemsets Apriori adicionados como restricoes",
-        "apriori_rule_confidence": "4. Confiancas das regras Apriori linearizadas",
-    }
-    for kind, title in grouped_titles.items():
-        selected_records = [item for item in records if item["kind"] == kind]
-        lines.append(title)
-        lines.append(f"  Total de entradas: {len(selected_records)}")
-        for index, item in enumerate(selected_records, start=1):
-            if "conditions" in item:
-                lines.append(
-                    f"  {index}. {item['lower']:.3f} <= {item['expression']} <= {item['upper']:.3f}"
-                )
-            else:
-                suffix = ""
-                if item.get("source"):
-                    suffix = (
-                        f" | fonte={item['source']}; "
-                        f"suporte={item.get('support', 0):.3f}; lift={item.get('lift', 0):.3f}"
-                    )
-                lines.append(f"  {index}. {item['expression']}{suffix}")
-        lines.append("")
-
-    return "\n".join(lines)
+    return "\n".join(lines) + "\n"
 
 
 def conclusion_text(
@@ -1406,14 +1457,17 @@ def full_linear_program():
     except ValueError as error:
         return jsonify({"ok": False, "error": str(error)}), 400
     except Exception as error:
-        return jsonify({"ok": False, "error": f"Erro ao gerar programa linear completo: {error}"}), 500
+        return jsonify({"ok": False, "error": f"Erro ao gerar modelo numerico auditavel: {error}"}), 500
 
     return jsonify(
         {
             "ok": True,
             "fileUrl": "/reports/generated/programa_linear_completo.txt",
             "downloadUrl": "/api/linear-program/full/download",
-            "message": "Programa linear completo gerado com sucesso.",
+            "message": "Modelo numerico auditavel gerado a partir das mesmas matrizes do solver.",
+            "modelDigest": lp.get("modelDigest"),
+            "solverVariables": lp.get("solverVariables"),
+            "constraints": lp.get("constraints"),
         }
     )
 
@@ -1421,7 +1475,7 @@ def full_linear_program():
 @app.get("/api/linear-program/full/download")
 def download_full_linear_program():
     if not FULL_LINEAR_PROGRAM_PATH.exists():
-        return jsonify({"ok": False, "error": "Gere o LP completo antes de baixar o TXT."}), 404
+        return jsonify({"ok": False, "error": "Gere o modelo numerico auditavel antes de baixar o TXT."}), 404
     return send_from_directory(
         GENERATED_REPORT_DIR,
         FULL_LINEAR_PROGRAM_PATH.name,
@@ -1531,7 +1585,29 @@ def write_query_report(result: dict[str, Any]) -> None:
     interval = (
         f"{format_report_probability(linear.get('lower'))} <= P(A | B) <= {format_report_probability(linear.get('upper'))}"
         if linear.get("ok")
-        else linear.get("error", "Nao calculado")
+        else f"Nao resolvido: {linear.get('error', 'motivo nao informado')}"
+    )
+    missing_rule_text = "Nao se aplica: a regra B -> A nao foi gerada pelo Apriori"
+    support_text = (
+        format_report_probability(result["support"])
+        if result["support"] is not None
+        else missing_rule_text
+    )
+    confidence_text = (
+        format_report_probability(result["confidence"])
+        if result["confidence"] is not None
+        else missing_rule_text
+    )
+    lift_text = (
+        format_report_number(result["lift"])
+        if result["lift"] is not None
+        else missing_rule_text
+    )
+    model_digest = str(linear.get("modelDigest", "-"))
+    model_digest_text: Any = (
+        Paragraph(f"{model_digest[:32]}<br/>{model_digest[32:]}", body)
+        if len(model_digest) == 64
+        else model_digest
     )
     story = [
         Paragraph("Relatorio da Consulta Atual", title),
@@ -1543,11 +1619,15 @@ def write_query_report(result: dict[str, Any]) -> None:
                 ["P(A)", format_report_probability(result["pA"])],
                 ["P(B)", format_report_probability(result["pB"])],
                 ["P(A e B) empirico (auditoria)", format_report_probability(result["pAB"])],
-                ["Suporte da regra Apriori", format_report_probability(result["support"])],
-                ["Confianca da regra Apriori", format_report_probability(result["confidence"])],
-                ["Lift descritivo", format_report_number(result["lift"])],
+                ["Suporte da regra Apriori", support_text],
+                ["Confianca da regra Apriori", confidence_text],
+                ["Lift descritivo", lift_text],
                 ["Instancias", f"{result['countBoth']} / {result['countBase']}"],
                 ["Intervalo linear", interval],
+                ["Variaveis de mundos", str(linear.get("worldVariables", "-"))],
+                ["Variaveis do solver (y_w e t)", str(linear.get("solverVariables", "-"))],
+                ["Restricoes do solver", str(linear.get("constraints", "-"))],
+                ["SHA-256 do modelo numerico", model_digest_text],
                 ["Inicio", result["processing"]["startedAt"]],
                 ["Fim", result["processing"]["finishedAt"]],
                 ["Duracao", f"{result['processing']['durationSeconds']:.3f} segundos"],
@@ -1568,7 +1648,13 @@ def write_query_report(result: dict[str, Any]) -> None:
         Spacer(1, 0.18 * cm),
         Paragraph("Conclusao", styles["Heading2"]),
         Paragraph(result["conclusion"], body),
-        Paragraph("Programa linear", styles["Heading2"]),
+        Paragraph("Formulacao matematica resumida", styles["Heading2"]),
+        Paragraph(
+            "A formulacao abaixo e didatica. O TXT auditavel, gerado na interface, "
+            "contem os vetores objetivo, A_ub, b_ub, A_eq, b_eq e limites exatos "
+            "do mesmo modelo identificado pelo SHA-256 acima.",
+            body,
+        ),
         Paragraph(result["linearProgram"].replace("\n", "<br/>"), code),
         Paragraph("Justificativa dos intervalos", styles["Heading2"]),
         Paragraph(

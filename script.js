@@ -188,7 +188,7 @@ function renderSolverComparison(result) {
   const conditionsText = escapeHtml(eventLabel(solverResult.conditions));
   const intervalTextValue = linear.ok
     ? `${fmt(linear.lower)} <= P(A | B) <= ${fmt(linear.upper)}`
-    : escapeHtml(linear.error || "Intervalo nao calculado");
+    : `Nao resolvido: ${escapeHtml(linear.error || "motivo nao informado")}`;
   const labels = {
     pA: "P(A)",
     pB: "P(B)",
@@ -273,7 +273,7 @@ function renderMathModel(result) {
   const constraintCount = result.linear?.constraints || "-";
   const interval = result.linear?.ok
     ? `${fmt(result.linear.lower)} <= P(A | B) <= ${fmt(result.linear.upper)}`
-    : "Nao calculado para esta consulta.";
+    : `Nao resolvido: ${escapeHtml(result.linear?.error || "motivo nao informado")}`;
   const learnedRules = result.learnedAssociationRules || [];
   const mining = result.aprioriMining || {};
   const releasedRule = ruleFromResult(result);
@@ -334,7 +334,7 @@ async function runQuery() {
     if (result.linear?.ok) {
       linearInterval = `<div><strong>Intervalo linear:</strong> ${fmt(result.linear.lower)} <= P(A | B) <= ${fmt(result.linear.upper)}.</div>`;
     } else if (result.linear?.reason === "zero_denominator") {
-      linearInterval = `<div><strong>Intervalo linear:</strong> não calculado porque P(B)=0; nenhuma linha do dataset satisfaz todas as afirmações.</div>`;
+      linearInterval = `<div><strong>Intervalo linear:</strong> não definido porque P(B)=0; nenhuma linha do dataset satisfaz todas as afirmações.</div>`;
     }
 
     const isZeroResult = Number(result.countBase) > 0 && Number(result.countBoth) === 0;
@@ -498,10 +498,11 @@ async function compareSolver() {
 }
 
 async function generateFullLinearProgram(downloadAfter = false) {
-  // Gera o TXT completo com evidencias empiricas, restricoes, regras,
-  // Charnes-Cooper e objetivos do programa linear.
+  // Exporta o mesmo modelo numerico usado pelo linprog: objetivos, matrizes,
+  // lados direitos, limites, mapeamento de variaveis e SHA-256 de auditoria.
+  const originalGenerateText = generateFullLinearProgramButton.textContent;
   generateFullLinearProgramButton.disabled = true;
-  generateFullLinearProgramButton.textContent = "Gerando LP...";
+  generateFullLinearProgramButton.textContent = "Gerando modelo...";
   downloadFullLinearProgramLink.classList.add("is-disabled");
   downloadFullLinearProgramLink.setAttribute("aria-disabled", "true");
   const originalDownloadText = downloadFullLinearProgramLink.textContent;
@@ -514,12 +515,18 @@ async function generateFullLinearProgram(downloadAfter = false) {
       body: JSON.stringify(buildPayload()),
     });
     const result = await readJsonResponse(response);
-    if (!response.ok || !result.ok) throw new Error(result.error || "Erro ao gerar LP completo.");
+    if (!response.ok || !result.ok) throw new Error(result.error || "Erro ao gerar o modelo auditavel.");
     const downloadUrl = `${result.downloadUrl || result.fileUrl}?t=${Date.now()}`;
     downloadFullLinearProgramLink.href = downloadUrl;
     downloadFullLinearProgramLink.classList.remove("is-disabled");
     downloadFullLinearProgramLink.setAttribute("aria-disabled", "false");
-    linearProgram.textContent = `${linearProgram.textContent}\n\nArquivo TXT completo gerado${downloadAfter ? " e download iniciado" : " e pronto para baixar"}.`;
+    const auditSummary = [
+      result.message || "Modelo numerico auditavel gerado.",
+      `SHA-256: ${result.modelDigest || "-"}`,
+      `Variaveis do solver: ${result.solverVariables ?? "-"}`,
+      `Restricoes: ${result.constraints ?? "-"}`,
+    ].join("\n");
+    linearProgram.textContent = `${linearProgram.textContent}\n\n${auditSummary}\nTXT ${downloadAfter ? "baixado" : "pronto para baixar"}.`;
     if (downloadAfter) {
       const temporaryLink = document.createElement("a");
       temporaryLink.href = downloadUrl;
@@ -529,10 +536,10 @@ async function generateFullLinearProgram(downloadAfter = false) {
       temporaryLink.remove();
     }
   } catch (error) {
-    linearProgram.textContent = `${linearProgram.textContent}\n\nErro ao gerar LP completo: ${error.message}`;
+    linearProgram.textContent = `${linearProgram.textContent}\n\nErro ao gerar o modelo auditavel: ${error.message}`;
   } finally {
     generateFullLinearProgramButton.disabled = false;
-    generateFullLinearProgramButton.textContent = "Gerar LP Completo";
+    generateFullLinearProgramButton.textContent = originalGenerateText;
     downloadFullLinearProgramLink.textContent = originalDownloadText;
     downloadFullLinearProgramLink.classList.remove("is-disabled");
     downloadFullLinearProgramLink.setAttribute("aria-disabled", "false");

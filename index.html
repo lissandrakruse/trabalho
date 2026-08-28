@@ -99,16 +99,16 @@
             <h2>Formula&ccedil;&atilde;o</h2>
             <div class="formulation-actions">
               <div class="tab-list" role="tablist" aria-label="Formula&ccedil;&atilde;o da consulta">
-                <button class="tab-button is-active" id="linearTab" type="button" role="tab" aria-selected="true" aria-controls="linearPanel">Programa Linear</button>
+                <button class="tab-button is-active" id="linearTab" type="button" role="tab" aria-selected="true" aria-controls="linearPanel">Resumo did&aacute;tico</button>
                 <button class="tab-button" id="mathTab" type="button" role="tab" aria-selected="false" aria-controls="mathPanel">Modelo Matem&aacute;tico</button>
               </div>
-              <button class="secondary-action compact-action" id="generateFullLinearProgram" type="button">Gerar LP Completo</button>
-              <a class="download-link compact-action" id="downloadFullLinearProgram" href="/api/linear-program/full/download" download="programa_linear_completo.txt" aria-disabled="false">Gerar e baixar LP em TXT</a>
+              <button class="secondary-action compact-action" id="generateFullLinearProgram" type="button">Gerar modelo audit&aacute;vel</button>
+              <a class="download-link compact-action" id="downloadFullLinearProgram" href="/api/linear-program/full/download" download="programa_linear_completo.txt" aria-disabled="false">Baixar matrizes exatas em TXT</a>
             </div>
           </div>
           <div class="tab-panel is-active" id="linearPanel" role="tabpanel" aria-labelledby="linearTab">
             <div class="formulation-note">
-              Este painel mostra o resumo do programa linear da consulta. Clique em <strong>Gerar e baixar LP em TXT</strong> para criar o arquivo completo, incluindo Ω, marginais, conjuntas por pares, regras Apriori convertidas em restri&ccedil;&otilde;es, transforma&ccedil;&atilde;o de Charnes-Cooper e objetivos do solver.
+              Este painel apresenta uma formula&ccedil;&atilde;o did&aacute;tica resumida. O TXT audit&aacute;vel &eacute; diferente: ele exporta exatamente as vari&aacute;veis, os dois vetores objetivo, <strong>A_ub</strong>, <strong>b_ub</strong>, <strong>A_eq</strong>, <strong>b_eq</strong>, limites e o SHA-256 do mesmo modelo enviado ao solver.
             </div>
             <pre class="lp-box" id="linearProgram"></pre>
           </div>
