@@ -40,9 +40,11 @@ O arquivo `scripts/site_robot.py` testa o site como um cliente externo. Ele veri
 - saude do servico e textos principais da interface;
 - carregamento dos 2.200 registros, 466 mundos e 5.312 regras Apriori;
 - consulta de referencia `P(label=rice | ph=acido, rainfall=alto)`;
+- consulta sem regra Apriori, com medidas vazias e explicacao objetiva;
+- comparacao real entre `highs`, `highs-ds` e `highs-ipm`;
 - intervalo do solver, 467 variaveis, 15.018 restricoes e SHA-256 do modelo;
 - correspondencia entre o modelo resolvido e o TXT auditavel;
-- geracao e cabecalho do relatorio PDF.
+- geracao e cabecalho dos relatorios PDF da consulta e dos solvers.
 
 Execucao completa contra o Render:
 

@@ -32,6 +32,13 @@ REFERENCE_QUERY = {
         {"attribute": "rainfall", "value": "alto"},
     ],
 }
+MISSING_RULE_QUERY = {
+    "target": {"attribute": "label", "value": "apple"},
+    "conditions": [
+        {"attribute": "N", "value": "alto"},
+        {"attribute": "P", "value": "alto"},
+    ],
+}
 
 
 class RobotFailure(RuntimeError):
@@ -213,6 +220,71 @@ def robot_run(client: SiteClient, wait_seconds: int, include_artifacts: bool) ->
 
     checks.append(run_check("consulta_de_referencia", check_query))
 
+    def check_missing_rule() -> dict[str, Any]:
+        result = client.json("/api/query", method="POST", payload=MISSING_RULE_QUERY)
+        require(result.get("ok") is True, f"Consulta sem regra recusada: {result.get('error')}")
+        require(result.get("releasedAssociationRule") is None, "O sistema fabricou uma regra Apriori para a consulta")
+        require(result.get("support") is None, "Suporte deveria ficar vazio quando a regra nao foi gerada")
+        require(result.get("confidence") is None, "Confianca deveria ficar vazia quando a regra nao foi gerada")
+        require(result.get("lift") is None, "Lift deveria ficar vazio quando a regra nao foi gerada")
+        require(result.get("countBoth") == 0, "A consulta sem regra deveria ter zero ocorrencias conjuntas")
+        require(result.get("countBase") == 103, "A consulta sem regra deveria ter 103 casos de B")
+        linear = result.get("linear") or {}
+        require(linear.get("ok") is True, f"Solver falhou na consulta sem regra: {linear.get('error')}")
+        require(close_to(linear.get("lower"), 0.0), "Limite inferior deveria ser zero")
+        require(close_to(linear.get("upper"), 0.0), "Limite superior deveria ser zero")
+        serialized = json.dumps(result, ensure_ascii=False).lower()
+        require("não calculado" not in serialized, "A resposta voltou a usar 'não calculado'")
+        require("nao calculado" not in serialized, "A resposta voltou a usar 'nao calculado'")
+        queried_rule = result.get("queriedAssociationRule") or {}
+        require(queried_rule.get("released") is False, "Status da regra ausente nao foi informado")
+        require("nao" in str(queried_rule.get("reason", "")).lower(), "Motivo da regra ausente nao foi explicado")
+        return {
+            "rule_available": False,
+            "support": result.get("support"),
+            "confidence": result.get("confidence"),
+            "lift": result.get("lift"),
+            "count_both": result["countBoth"],
+            "count_base": result["countBase"],
+            "lower": linear["lower"],
+            "upper": linear["upper"],
+            "reason": queried_rule.get("reason"),
+        }
+
+    checks.append(run_check("consulta_sem_regra_apriori", check_missing_rule))
+
+    def check_solver_comparison() -> dict[str, Any]:
+        result = client.json("/api/solver/compare", method="POST", payload=REFERENCE_QUERY)
+        require(result.get("ok") is True, f"Comparacao dos solvers falhou: {result.get('error')}")
+        comparison = result.get("comparison") or {}
+        require(comparison.get("allMatch") is True, "Solver principal e solver independente divergiram")
+        engines = result.get("solverEngineResults") or []
+        require(len(engines) == 3, "A comparacao nao executou os tres metodos HiGHS")
+        expected_methods = {"highs", "highs-ds", "highs-ipm"}
+        require({engine.get("method") for engine in engines} == expected_methods, "Catalogo de metodos executados esta incompleto")
+        for engine in engines:
+            require(engine.get("status") == "ok", f"Metodo {engine.get('method')} falhou")
+            require(engine.get("allMatch") is True, f"Metodo {engine.get('method')} divergiu")
+            require(engine.get("variables") == 467, f"Metodo {engine.get('method')} nao usou 467 variaveis")
+            require(engine.get("constraints") == 15018, f"Metodo {engine.get('method')} nao usou 15.018 restricoes")
+            require(close_to(engine.get("lower"), 0.15005815141370793, 1e-8), f"Limite inferior divergente em {engine.get('method')}")
+            require(close_to(engine.get("upper"), 0.152, 1e-8), f"Limite superior divergente em {engine.get('method')}")
+        state["solver_comparison"] = result
+        return {
+            "all_match": True,
+            "engines": [
+                {
+                    "method": engine["method"],
+                    "status": engine["status"],
+                    "lower": engine["lower"],
+                    "upper": engine["upper"],
+                }
+                for engine in engines
+            ],
+        }
+
+    checks.append(run_check("comparacao_dos_tres_solvers", check_solver_comparison))
+
     if include_artifacts:
         def check_txt() -> dict[str, Any]:
             query = state.get("query")
@@ -255,6 +327,26 @@ def robot_run(client: SiteClient, wait_seconds: int, include_artifacts: bool) ->
             }
 
         checks.append(run_check("relatorio_pdf", check_pdf))
+
+        def check_solver_pdf() -> dict[str, Any]:
+            generated = client.json(
+                "/api/report/solver-comparison",
+                method="POST",
+                payload=REFERENCE_QUERY,
+            )
+            require(generated.get("ok") is True, f"PDF comparativo falhou: {generated.get('error')}")
+            require((generated.get("comparison") or {}).get("allMatch") is True, "PDF comparativo foi gerado com divergencia")
+            pdf, headers = client.request(generated["reportUrl"])
+            require(pdf.startswith(b"%PDF-"), "Relatorio comparativo nao possui cabecalho PDF")
+            require(len(pdf) > 4_000, "Relatorio comparativo esta pequeno demais")
+            return {
+                "bytes": len(pdf),
+                "content_type": headers.get("Content-Type", ""),
+                "report_url": generated["reportUrl"],
+                "all_match": True,
+            }
+
+        checks.append(run_check("relatorio_pdf_dos_solvers", check_solver_pdf))
 
     approved = all(check.status == "aprovado" for check in checks)
     return {
