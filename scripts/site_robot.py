@@ -119,15 +119,27 @@ def close_to(actual: Any, expected: float, tolerance: float = 1e-9) -> bool:
         return False
 
 
-def wait_until_healthy(client: SiteClient, wait_seconds: int) -> dict[str, Any]:
+def wait_until_healthy(
+    client: SiteClient,
+    wait_seconds: int,
+    expected_commit: str | None = None,
+) -> dict[str, Any]:
     deadline = time.monotonic() + wait_seconds
     last_error = "servico ainda nao consultado"
     while True:
         try:
             result = client.json("/healthz")
-            if result.get("ok") is True:
+            deployed_commit = str(result.get("commit") or "")
+            commit_matches = not expected_commit or deployed_commit.startswith(expected_commit)
+            if result.get("ok") is True and commit_matches:
                 return result
-            last_error = f"resposta inesperada: {result}"
+            if result.get("ok") is True and not commit_matches:
+                last_error = (
+                    f"deploy atual {deployed_commit or 'sem SHA'}; "
+                    f"aguardando {expected_commit}"
+                )
+            else:
+                last_error = f"resposta inesperada: {result}"
         except RobotFailure as error:
             last_error = str(error)
         if time.monotonic() >= deadline:
@@ -144,14 +156,22 @@ def run_check(name: str, action: Callable[[], dict[str, Any]]) -> CheckResult:
         return CheckResult(name, "reprovado", time.perf_counter() - started, {}, str(error))
 
 
-def robot_run(client: SiteClient, wait_seconds: int, include_artifacts: bool) -> dict[str, Any]:
+def robot_run(
+    client: SiteClient,
+    wait_seconds: int,
+    include_artifacts: bool,
+    expected_commit: str | None = None,
+) -> dict[str, Any]:
     state: dict[str, Any] = {}
     checks: list[CheckResult] = []
 
     checks.append(
         run_check(
             "saude_do_servico",
-            lambda: {"response": wait_until_healthy(client, wait_seconds)},
+            lambda: {
+                "response": wait_until_healthy(client, wait_seconds, expected_commit),
+                "expected_commit": expected_commit,
+            },
         )
     )
 
@@ -369,6 +389,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL, help="Endereco da aplicacao")
     parser.add_argument("--timeout", type=float, default=420.0, help="Timeout de cada requisicao em segundos")
     parser.add_argument("--wait-seconds", type=int, default=300, help="Tempo para aguardar o Render acordar")
+    parser.add_argument("--expected-commit", help="SHA que precisa estar implantado antes dos testes")
     parser.add_argument("--quick", action="store_true", help="Nao gera o TXT grande nem o PDF")
     parser.add_argument("--output", type=Path, default=Path("robot-test-report.json"), help="Arquivo JSON de evidencias")
     return parser.parse_args()
@@ -380,6 +401,7 @@ def main() -> int:
         SiteClient(args.base_url, timeout=args.timeout),
         wait_seconds=max(0, args.wait_seconds),
         include_artifacts=not args.quick,
+        expected_commit=args.expected_commit,
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")

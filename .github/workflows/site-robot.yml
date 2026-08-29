@@ -1,6 +1,9 @@
 name: Robo de teste do site
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       base_url:
@@ -38,7 +41,14 @@ jobs:
       - name: Executar robo no Render
         shell: bash
         run: |
-          ARGS=(--base-url "${{ inputs.base_url }}" --timeout 420 --output artifacts/robot-test-report.json)
+          BASE_URL="${{ inputs.base_url }}"
+          if [[ -z "$BASE_URL" ]]; then
+            BASE_URL="https://trabalho-bh30.onrender.com/"
+          fi
+          ARGS=(--base-url "$BASE_URL" --timeout 420 --wait-seconds 600 --output artifacts/robot-test-report.json)
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            ARGS+=(--expected-commit "${{ github.sha }}")
+          fi
           if [[ "${{ inputs.quick }}" == "true" ]]; then
             ARGS+=(--quick)
           fi

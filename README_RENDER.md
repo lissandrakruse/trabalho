@@ -56,7 +56,11 @@ python scripts/site_robot.py \
 
 Use `--quick` para testar sem gerar o TXT e o PDF. O processo termina com codigo 1 se alguma verificacao falhar e sempre grava as evidencias em JSON.
 
-No GitHub, a acao **Robo de teste do site** pode ser iniciada manualmente na aba **Actions**. Ao final, ela disponibiliza o arquivo `robot-test-report.json` como artefato da execucao.
+No GitHub, a acao **Robo de teste do site** e executada automaticamente em cada
+novo commit da `main` e tambem pode ser iniciada manualmente na aba **Actions**.
+Nos testes automaticos, o robo aguarda o Render confirmar o SHA implantado antes
+de comecar. Ao final, ele disponibiliza o arquivo `robot-test-report.json` como
+artefato da execucao.
 
 ## Desempenho da comparacao
 

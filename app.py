@@ -1142,7 +1142,14 @@ def scripts():
 
 @app.get("/healthz")
 def healthz():
-    return jsonify({"ok": True})
+    return jsonify(
+        {
+            "ok": True,
+            # O Render preenche esta variavel com o commit realmente implantado.
+            # O robo usa o valor para nao testar por engano uma versao anterior.
+            "commit": os.environ.get("RENDER_GIT_COMMIT"),
+        }
+    )
 
 
 @app.get("/<path:path>")
