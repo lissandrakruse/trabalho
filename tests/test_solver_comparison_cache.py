@@ -15,10 +15,30 @@ import app
 
 class SolverComparisonCacheTest(unittest.TestCase):
     def setUp(self) -> None:
+        app._cached_query_result.cache_clear()
         app._cached_solver_comparison.cache_clear()
 
     def tearDown(self) -> None:
+        app._cached_query_result.cache_clear()
         app._cached_solver_comparison.cache_clear()
+
+    def test_same_query_reuses_main_solver_result(self) -> None:
+        payload_a = {
+            "conditions": [{"value": "acido", "attribute": "ph"}],
+            "target": {"value": "rice", "attribute": "label"},
+        }
+        payload_b = {
+            "target": {"attribute": "label", "value": "rice"},
+            "conditions": [{"attribute": "ph", "value": "acido"}],
+        }
+        expected = {"ok": True, "linear": {"solverMethod": "highs-ipm"}}
+
+        with patch("app._compute_query_uncached", return_value=expected) as compute:
+            first = app.compute_query(payload_a)
+            second = app.compute_query(payload_b)
+
+        self.assertIs(first, second)
+        self.assertEqual(compute.call_count, 1)
 
     def test_same_payload_reuses_solver_results_for_pdf(self) -> None:
         payload_a = {

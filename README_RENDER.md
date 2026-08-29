@@ -68,5 +68,8 @@ A primeira comparacao executa os tres metodos reais do HiGHS. O resultado do
 HiGHS-IPM, ja produzido pelo projeto principal, e reaproveitado na tabela, e os
 outros dois metodos sao executados pelo script separado. A comparacao fica em
 cache por consulta para que a geracao posterior do PDF nao resolva novamente os
-mesmos programas lineares. O limite de 360 segundos do Gunicorn contempla a
-primeira execucao em instancias gratuitas do Render.
+mesmos programas lineares. O resultado do botao **Consultar** tambem fica em
+cache e e reutilizado quando a comparacao recebe a mesma consulta. O limite de
+360 segundos do Gunicorn contempla a primeira execucao em instancias gratuitas
+do Render e a reutilizacao mantem o caminho normal abaixo de limites menores
+configurados diretamente no painel do servico.

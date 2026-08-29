@@ -1182,7 +1182,7 @@ def metadata():
     )
 
 
-def compute_query(
+def _compute_query_uncached(
     payload: dict[str, Any],
     solver_method: str = "highs-ipm",
     solver_name: str = "SciPy HiGHS Interior Point",
@@ -1276,6 +1276,31 @@ def compute_query(
         "linearProgramFullAvailable": True,
         "conclusion": conclusion,
     }
+
+
+@lru_cache(maxsize=32)
+def _cached_query_result(
+    payload_json: str,
+    solver_method: str,
+    solver_name: str,
+) -> dict[str, Any]:
+    return _compute_query_uncached(
+        json.loads(payload_json),
+        solver_method=solver_method,
+        solver_name=solver_name,
+    )
+
+
+def compute_query(
+    payload: dict[str, Any],
+    solver_method: str = "highs-ipm",
+    solver_name: str = "SciPy HiGHS Interior Point",
+) -> dict[str, Any]:
+    # A interface consulta primeiro e compara os solvers depois. Reutilizar o
+    # resultado principal elimina duas resolucoes identicas do caminho critico
+    # da comparacao, o que mantem a rota abaixo do limite do Render.
+    payload_json = json.dumps(payload, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+    return _cached_query_result(payload_json, solver_method, solver_name)
 
 
 def compare_number(main_value: float | int | None, solver_value: float | int | None) -> dict[str, Any]:
