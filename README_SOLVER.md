@@ -105,6 +105,13 @@ O intervalo de `P(A | B)` é inferido a partir das marginais, conjuntas por pare
 e regras Apriori globais. Os cards de suporte, confiança e lift só recebem valor
 quando a regra consultada `B -> A` realmente pertence à saída do Apriori.
 
+Se `P(A e B)=0` na amostra, esse valor continua aparecendo somente como
+auditoria. Para não confundir ausência na amostra com impossibilidade lógica, o
+modelo acrescenta as combinações completas de `A e B` que não foram observadas,
+sempre com contagem empírica zero. Essas novas colunas recebem as mesmas
+restrições globais e permitem ao solver calcular um intervalo como `0` até um
+valor pequeno, em vez de criar um vetor objetivo vazio e devolver `0 a 0`.
+
 ### 7. Charnes–Cooper e HiGHS
 
 A consulta é fracionária:
@@ -144,9 +151,12 @@ na chamada de `scipy.optimize.linprog`. O arquivo contém:
 - limites de cada variável e a origem de cada linha de desigualdade;
 - SHA-256 canônico do modelo, repetido no resultado do solver e no TXT.
 
-Assim, com 466 mundos, a matriz entregue ao solver possui 467 variáveis após
-Charnes–Cooper (`466 y_w + t`). O digest impede que uma formulação diferente
-seja exportada silenciosamente: se os modelos divergirem, a geração falha.
+Nas consultas já observadas, os 466 mundos geram 467 variáveis após
+Charnes–Cooper (`466 y_w + t`). Quando `A e B` não foi observado, o número de
+variáveis cresce apenas para aquela consulta, de acordo com os mundos de
+contagem zero que a completam. O TXT identifica cada mundo como observado ou
+completado. O digest impede que uma formulação diferente seja exportada
+silenciosamente: se os modelos divergirem, a geração falha.
 
 ## Interface do usuário
 

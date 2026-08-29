@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import itertools
 import json
 import math
 import os
@@ -318,6 +319,56 @@ def add_sparse_vectors(
         else:
             result[index] = combined
     return result
+
+
+def complete_unobserved_query_worlds(
+    worlds: list[dict[str, Any]],
+    rows: list[dict[str, str]],
+    target: dict[str, str],
+    base: list[dict[str, str]],
+) -> tuple[list[dict[str, Any]], int]:
+    """Add zero-count completions when A and B never occur together.
+
+    The empirical dataset remains unchanged: added worlds have count zero. They
+    only give the LP variables for logically possible A-and-B combinations, so
+    empirical P(A and B)=0 does not force the optimized upper bound to zero.
+    """
+    both = [*base, target]
+    if any(matches(world["values"], both) for world in worlds):
+        return worlds, 0
+
+    attributes = list(rows[0].keys())
+    domains = {
+        attribute: sorted({row[attribute] for row in rows})
+        for attribute in attributes
+    }
+    fixed: dict[str, str] = {}
+    for condition in both:
+        previous = fixed.get(condition["attribute"])
+        if previous is not None and previous != condition["value"]:
+            return worlds, 0
+        fixed[condition["attribute"]] = condition["value"]
+
+    free_attributes = [attribute for attribute in attributes if attribute not in fixed]
+    observed_keys = {
+        tuple(world["values"][attribute] for attribute in attributes)
+        for world in worlds
+    }
+    additions: list[dict[str, Any]] = []
+    for values in itertools.product(*(domains[attribute] for attribute in free_attributes)):
+        completed = dict(fixed)
+        completed.update(dict(zip(free_attributes, values)))
+        key = tuple(completed[attribute] for attribute in attributes)
+        if key in observed_keys:
+            continue
+        additions.append(
+            {
+                "values": completed,
+                "count": 0,
+                "queryCompletion": True,
+            }
+        )
+    return [*worlds, *additions], len(additions)
 
 
 def mask_expression(conditions: list[dict[str, str]]) -> str:
@@ -682,10 +733,14 @@ def build_transformed_linear_program(
     The returned sparse rows, right-hand sides, objectives and bounds are the
     single source of truth for both optimization and the auditable TXT export.
     """
-    del rows  # Constraints are dataset-wide and already cached from this dataset.
     n_worlds = len(worlds)
     t_index = n_worlds
-    a_ub, b_ub, records = cached_linear_constraint_model()
+    if any(world.get("queryCompletion") for world in worlds):
+        # The numerical limits still come exclusively from the observed rows;
+        # zero-count completions only add eligible LP columns.
+        a_ub, b_ub, records = build_linear_constraints(worlds, rows, target, base)
+    else:
+        a_ub, b_ub, records = cached_linear_constraint_model()
     both = [*base, target]
     denominator_mask = sparse_world_mask(worlds, base)
     numerator_mask = sparse_world_mask(worlds, both)
@@ -777,7 +832,13 @@ def solve_linear_interval(
     except Exception as error:
         return {"ok": False, "error": f"scipy indisponivel: {error}"}
 
-    model = build_transformed_linear_program(worlds, rows, target, base)
+    model_worlds, completion_count = complete_unobserved_query_worlds(
+        worlds,
+        rows,
+        target,
+        base,
+    )
+    model = build_transformed_linear_program(model_worlds, rows, target, base)
     variable_count = model["solverVariables"]
 
     def sparse_matrix(sparse_rows: list[dict[int, float]]) -> Any:
@@ -829,6 +890,9 @@ def solve_linear_interval(
         "upper": upper_lo,
         "variables": model["solverVariables"],
         "worldVariables": model["worldVariables"],
+        "observedWorldVariables": len(worlds),
+        "queryCompletionWorlds": completion_count,
+        "empiricalJointZero": probability_count(rows, [*base, target]) == 0,
         "solverVariables": model["solverVariables"],
         "constraints": transformed_a_ub.shape[0] + transformed_a_eq.shape[0],
         "baseConstraints": len(model["aUb"]),
@@ -865,7 +929,8 @@ def linear_program_text(
         f"  A e B = {event_key([*base, target])}",
         "",
         "2. Variaveis:",
-        "  Cada mundo possivel w e uma combinacao categorica observada no dataset.",
+        "  Cada mundo possivel w e uma combinacao categorica completa.",
+        "  Mundos observados preservam sua contagem; completamentos da consulta tem contagem zero.",
         "  x_w >= 0 representa a massa de probabilidade atribuida ao mundo w.",
         "",
         "3. Normalizacao probabilistica:",
@@ -905,6 +970,8 @@ def linear_program_text(
                 "",
                 f"Solver: {lp['solver']}",
                 f"Variaveis de mundos: {lp.get('worldVariables', lp['variables'])}",
+                f"Mundos observados: {lp.get('observedWorldVariables', '-')}",
+                f"Mundos completados para a consulta: {lp.get('queryCompletionWorlds', 0)}",
                 f"Variaveis enviadas ao solver (y_w e t): {lp.get('solverVariables', lp['variables'])}",
                 f"Restricoes: {lp['constraints']}",
                 f"SHA-256 do modelo numerico: {lp.get('modelDigest', '-')}",
@@ -933,7 +1000,13 @@ def full_linear_program_text(
     base: list[dict[str, str]],
     lp: dict[str, Any],
 ) -> str:
-    model = build_transformed_linear_program(worlds, rows, target, base)
+    model_worlds, completion_count = complete_unobserved_query_worlds(
+        worlds,
+        rows,
+        target,
+        base,
+    )
+    model = build_transformed_linear_program(model_worlds, rows, target, base)
     solver_digest = lp.get("modelDigest")
     if solver_digest and solver_digest != model["digest"]:
         raise RuntimeError(
@@ -968,6 +1041,8 @@ def full_linear_program_text(
         f"sha256_modelo={model['digest']}",
         f"sha256_confirmado_pelo_solver={solver_digest or model['digest']}",
         f"mundos={model['worldVariables']}",
+        f"mundos_observados={len(worlds)}",
+        f"mundos_completados_para_consulta={completion_count}",
         f"variaveis_solver={model['solverVariables']}",
         f"linhas_A_ub={len(model['aUb'])}",
         f"linhas_A_eq={len(model['aEq'])}",
@@ -979,11 +1054,12 @@ def full_linear_program_text(
         "",
         "MAPEAMENTO EXATO DAS VARIAVEIS",
     ]
-    for column, world in enumerate(worlds):
+    for column, world in enumerate(model_worlds):
         values = json.dumps(world["values"], ensure_ascii=False, sort_keys=True)
         lines.append(
             f"col={column};var={model['variableNames'][column]};"
             f"mundo=w_{column + 1:04d};contagem={int(world.get('count', 1))};"
+            f"origem={'completado_para_consulta' if world.get('queryCompletion') else 'observado'};"
             f"valores={values};relacao_original=x_{column + 1:04d}=y_{column + 1:04d}/t"
         )
     lines.append(
@@ -1619,6 +1695,12 @@ def format_report_probability(value: float | None) -> str:
     return fmt_probability(value).replace(".", ",")
 
 
+def format_report_interval_probability(value: float | None) -> str:
+    if value is None:
+        return "-"
+    return f"{clean_probability(value):.6f}".replace(".", ",")
+
+
 def format_report_number(value: float | None) -> str:
     if value is None:
         return "-"
@@ -1701,7 +1783,7 @@ def write_query_report(result: dict[str, Any]) -> None:
     conditions = event_key(result["conditions"])
     linear = result["linear"]
     interval = (
-        f"{format_report_probability(linear.get('lower'))} <= P(A | B) <= {format_report_probability(linear.get('upper'))}"
+        f"{format_report_interval_probability(linear.get('lower'))} <= P(A | B) <= {format_report_interval_probability(linear.get('upper'))}"
         if linear.get("ok")
         else f"Nao resolvido: {linear.get('error', 'motivo nao informado')}"
     )
@@ -1736,12 +1818,14 @@ def write_query_report(result: dict[str, Any]) -> None:
                 ["Metrica", "Valor"],
                 ["P(A)", format_report_probability(result["pA"])],
                 ["P(B)", format_report_probability(result["pB"])],
-                ["P(A e B) empirico (auditoria)", format_report_probability(result["pAB"])],
+                ["P(A e B) empirico (somente auditoria da base)", format_report_probability(result["pAB"])],
                 ["Suporte da regra Apriori", support_text],
                 ["Confianca da regra Apriori", confidence_text],
                 ["Lift descritivo", lift_text],
                 ["Instancias", f"{result['countBoth']} / {result['countBase']}"],
-                ["Intervalo linear", interval],
+                ["Resultado de P(A | B) calculado pelo programa linear", interval],
+                ["Mundos observados", str(linear.get("observedWorldVariables", "-"))],
+                ["Mundos completados para a consulta", str(linear.get("queryCompletionWorlds", 0))],
                 ["Variaveis de mundos", str(linear.get("worldVariables", "-"))],
                 ["Variaveis do solver (y_w e t)", str(linear.get("solverVariables", "-"))],
                 ["Restricoes do solver", str(linear.get("constraints", "-"))],
@@ -1750,6 +1834,15 @@ def write_query_report(result: dict[str, Any]) -> None:
                 ["Fim", result["processing"]["finishedAt"]],
                 ["Duracao", f"{result['processing']['durationSeconds']:.3f} segundos"],
             ]
+        ),
+        Spacer(1, 0.18 * cm),
+        Paragraph(
+            (
+                "Os valores P(A), P(B) e P(A e B) acima sao frequencias empiricas usadas para auditoria da base; "
+                "nao sao o resultado do programa linear. Quando P(A e B) empirico e zero, mundos possiveis de "
+                "contagem zero completam a consulta e permitem ao solver calcular um limite superior pequeno."
+            ),
+            body,
         ),
         Spacer(1, 0.18 * cm),
         Paragraph("Mineracao Apriori e restricoes", styles["Heading2"]),

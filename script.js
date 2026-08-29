@@ -11,6 +11,7 @@ const generateFullLinearProgramButton = document.querySelector("#generateFullLin
 const downloadReportLink = document.querySelector("#downloadReport");
 const downloadSolverReportLink = document.querySelector("#downloadSolverReport");
 const downloadFullLinearProgramLink = document.querySelector("#downloadFullLinearProgram");
+const conditionalValue = document.querySelector("#conditionalValue");
 const supportValue = document.querySelector("#supportValue");
 const confidenceValue = document.querySelector("#confidenceValue");
 const liftValue = document.querySelector("#liftValue");
@@ -92,6 +93,11 @@ function readConditions() {
 function fmt(value) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return "-";
   return Number(value).toFixed(3);
+}
+
+function fmtDetailed(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return "-";
+  return Number(value).toFixed(6);
 }
 
 function fmtCompare(value) {
@@ -292,7 +298,7 @@ function renderMathModel(result) {
     `<section class="math-block"><h3>3. Apriori</h3><p>Ω e fornecido ao Apriori como conjunto de transacoes ponderadas. O algoritmo encontrou <strong>${mining.frequentItemsets ?? "-"}</strong> itemsets frequentes e gerou <strong>${mining.ruleCount ?? learnedRules.length}</strong> regras. O suporte minimo e apenas o criterio de frequencia do Apriori; confianca e lift nao filtram qualidade.</p><div class="constraint-list"><code>suporte minimo = ${fmt(mining.minSupport)}</code><code>confianca minima = ${fmt(mining.minConfidence)}</code><code>tamanho maximo do itemset = ${mining.maxItemsetSize ?? "-"}</code></div></section>`,
     `<section class="math-block"><h3>4. Medidas da regra</h3><p>Suporte e confianca sao probabilidades usadas para construir restricoes. Lift fica apenas como descricao da associacao; nao representa acuracia e nao e usado para filtrar regras.</p><div class="constraint-list"><code>suporte(R -> S) = P(R e S)</code><code>confianca(R -> S) = P(R e S) / P(R)</code><code>lift(R -> S) = confianca / P(S) [somente descritivo]</code>${releasedRuleText}</div></section>`,
     `<section class="math-block"><h3>5. Regras convertidas em restricoes</h3><p>Todas as regras geradas entram na formulacao. O suporte ancora a intersecao e a confianca vira duas desigualdades lineares. A ordem da lista e apenas deterministica, nao um ranking de qualidade.</p><div class="constraint-list"><code>Lsup <= P(R e S) <= Usup</code><code>P(R e S) - Uconf.P(R) <= 0</code><code>-P(R e S) + Lconf.P(R) <= 0</code>${learnedRuleItems}</div></section>`,
-    `<section class="math-block"><h3>6. Marginais e pares</h3><p>As probabilidades marginais e conjuntas por pares sao somadas as restricoes Apriori. P(A), P(B) e P(A e B) abaixo servem para auditoria; a consulta nao injeta sua propria resposta conjunta no LP.</p><div class="constraint-list"><code>P(A) empirico = ${fmt(result.pA)}</code><code>P(B) empirico = ${fmt(result.pB)}</code><code>P(A e B) empirico = ${fmt(result.pAB)}</code><code>L <= sum(x<sub>w</sub> onde evento) <= U</code></div></section>`,
+    `<section class="math-block"><h3>6. Marginais, pares e mundos da consulta</h3><p>As probabilidades marginais e conjuntas por pares sao somadas as restricoes Apriori. P(A), P(B) e P(A e B) abaixo servem somente para auditoria da base. Quando P(A e B) empirico e zero, o modelo acrescenta mundos possiveis com contagem zero para o programa linear calcular um limite superior pequeno, em vez de declarar o evento impossivel.</p><div class="constraint-list"><code>P(A) empirico = ${fmt(result.pA)}</code><code>P(B) empirico = ${fmt(result.pB)}</code><code>P(A e B) empirico = ${fmt(result.pAB)}</code><code>Mundos observados = ${result.linear?.observedWorldVariables ?? "-"}</code><code>Mundos completados para a consulta = ${result.linear?.queryCompletionWorlds ?? 0}</code><code>L <= sum(x<sub>w</sub> onde evento) <= U</code></div></section>`,
     `<section class="math-block"><h3>7. Consulta condicional</h3><p>A pergunta final continua sendo probabilistica: qual intervalo e possivel para A quando B ocorre, respeitando as evidencias da base e as regras liberadas?</p><code>P(A | B) = P(A e B) / P(B) = sum(x<sub>w</sub> onde ${abLabel}) / sum(x<sub>w</sub> onde ${bLabel})</code></section>`,
     `<section class="math-block"><h3>8. Charnes-Cooper</h3><p>Como P(A | B) e uma razao, o modelo aplica Charnes-Cooper para transformar o problema fracionario em programacao linear.</p><div class="constraint-list"><code>y<sub>w</sub> = x<sub>w</sub> / P(B)</code><code>t = 1 / P(B)</code><code>sum(y<sub>w</sub> onde B) = 1</code><code>A y - b t <= 0</code><code>sum<sub>w em W</sub> y<sub>w</sub> - t = 0</code></div></section>`,
     `<section class="math-block"><h3>9. Solver</h3><p>O HiGHS resolve dois programas lineares: um minimiza e outro maximiza a massa dos mundos que satisfazem A e B. A comparacao executa highs, highs-ds e highs-ipm para avaliar consistencia numerica e tempo.</p><div class="constraint-list"><code>min sum(y<sub>w</sub> onde ${abLabel})</code><code>max sum(y<sub>w</sub> onde ${abLabel})</code><code>restricoes lineares: ${constraintCount}</code></div><p><strong>Resultado:</strong> ${interval}.</p></section>`,
@@ -329,17 +335,20 @@ async function runQuery() {
     confidenceValue.textContent = releasedRule ? fmt(releasedRule.confidence) : "-";
     liftValue.textContent = releasedRule ? fmt(releasedRule.lift) : "-";
     countValue.textContent = `${result.countBoth}/${result.countBase}`;
+    conditionalValue.textContent = result.linear?.ok
+      ? `${fmtDetailed(result.linear.lower)} a ${fmtDetailed(result.linear.upper)}`
+      : "não definido";
 
     let linearInterval = `<div><strong>Intervalo linear:</strong> solver indisponível.</div>`;
     if (result.linear?.ok) {
-      linearInterval = `<div><strong>Intervalo linear:</strong> ${fmt(result.linear.lower)} <= P(A | B) <= ${fmt(result.linear.upper)}.</div>`;
+      linearInterval = `<div><strong>Resultado de P(A | B) calculado pelo programa linear:</strong> ${fmtDetailed(result.linear.lower)} <= P(A | B) <= ${fmtDetailed(result.linear.upper)}.</div>`;
     } else if (result.linear?.reason === "zero_denominator") {
       linearInterval = `<div><strong>Intervalo linear:</strong> não definido porque P(B)=0; nenhuma linha do dataset satisfaz todas as afirmações.</div>`;
     }
 
     const isZeroResult = Number(result.countBase) > 0 && Number(result.countBoth) === 0;
     const zeroResultNotice = isZeroResult
-      ? `<div><strong>Contagem empirica:</strong> existem ${result.countBase} registros que satisfazem B, mas nenhum deles tambem satisfaz A.</div>`
+      ? `<div><strong>Auditoria empirica:</strong> existem ${result.countBase} registros que satisfazem B, mas nenhum deles tambem satisfaz A; portanto P(A e B) empirico = 0. Isso nao fixa P(A | B) em zero no programa linear. O solver acrescentou ${result.linear?.queryCompletionWorlds || 0} mundos possiveis de contagem zero e calculou o intervalo acima.</div>`
       : "";
     const releasedRuleNotice = releasedRule
       ? `<div><strong>Regra Apriori encontrada:</strong> os cards mostram as medidas retornadas pelo minerador.</div>`
@@ -386,7 +395,7 @@ async function runQuery() {
       ruleMetricContent,
       queriedRuleContent,
       `<div class="learned-rules-block"><strong>Regras Apriori no PL:</strong> ${learnedRuleContent}</div>`,
-      `<div><strong>Auditoria empirica da consulta:</strong> P(A)=${fmt(result.pA)}, P(B)=${fmt(result.pB)} e P(A e B)=${fmt(result.pAB)}. O valor conjunto da consulta nao e injetado como resposta pronta.</div>`,
+      `<div><strong>Valores somente para auditoria da base:</strong> P(A)=${fmt(result.pA)}, P(B)=${fmt(result.pB)} e P(A e B)=${fmt(result.pAB)}. Estes valores empiricos nao sao apresentados como resultado do programa linear e a consulta nao injeta sua resposta no objetivo.</div>`,
       linearInterval,
       `<div><strong>Conclusao:</strong> ${conclusionContent}</div>`,
     ].join("");

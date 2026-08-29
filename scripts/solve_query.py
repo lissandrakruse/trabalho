@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import itertools
 import json
 import math
 import sys
@@ -223,6 +224,39 @@ def add_sparse_vectors(
     return result
 
 
+def complete_unobserved_query_worlds(
+    data: dict[str, Any],
+    target: dict[str, str],
+    base: list[dict[str, str]],
+) -> tuple[list[dict[str, Any]], int]:
+    worlds = data["worlds"]
+    both = [*base, target]
+    if any(matches(world["values"], both) for world in worlds):
+        return worlds, 0
+
+    fixed: dict[str, str] = {}
+    for condition in both:
+        previous = fixed.get(condition["attribute"])
+        if previous is not None and previous != condition["value"]:
+            return worlds, 0
+        fixed[condition["attribute"]] = condition["value"]
+    free_attributes = [attribute for attribute in data["attributes"] if attribute not in fixed]
+    observed_keys = {
+        tuple(world["values"][attribute] for attribute in data["attributes"])
+        for world in worlds
+    }
+    additions = []
+    for values in itertools.product(*(data["domains"][attribute] for attribute in free_attributes)):
+        completed = dict(fixed)
+        completed.update(dict(zip(free_attributes, values)))
+        key = tuple(completed[attribute] for attribute in data["attributes"])
+        if key not in observed_keys:
+            additions.append(
+                {"values": completed, "count": 0, "queryCompletion": True}
+            )
+    return [*worlds, *additions], len(additions)
+
+
 def rounded_interval(value: float, width: float = 0.001) -> tuple[float, float]:
     rounded = round(value, 3)
     return max(0.0, rounded - width), min(1.0, rounded + width)
@@ -398,7 +432,7 @@ def solve_linear_interval(
     # Resolve dois LPs: um minimiza e outro maximiza P(A | B). A razao e
     # linearizada por Charnes-Cooper antes da chamada ao scipy.optimize.linprog.
     rows = data["rows"]
-    worlds = data["worlds"]
+    observed_worlds = data["worlds"]
     denominator_probability = probability(rows, base)
     denominator_count = probability_count(rows, base)
     if denominator_count == 0 or denominator_probability <= 0:
@@ -419,11 +453,13 @@ def solve_linear_interval(
     except Exception as error:
         return {"ok": False, "error": f"scipy indisponivel: {error}"}
 
+    worlds, completion_count = complete_unobserved_query_worlds(data, target, base)
     n = len(worlds)
-    if data.get("datasetPath") == str(DEFAULT_DATASET.resolve()):
+    if data.get("datasetPath") == str(DEFAULT_DATASET.resolve()) and completion_count == 0:
         a_ub, b_ub, summary = cached_linear_constraint_model()
     else:
-        a_ub, b_ub, summary = build_linear_constraints(data, target, base)
+        model_data = {**data, "worlds": worlds}
+        a_ub, b_ub, summary = build_linear_constraints(model_data, target, base)
 
     both = [*base, target]
 
@@ -482,6 +518,9 @@ def solve_linear_interval(
         "upper": clean_probability(float(-upper_result.fun)),
         "variables": n + 1,
         "worldVariables": n,
+        "observedWorldVariables": len(observed_worlds),
+        "queryCompletionWorlds": completion_count,
+        "empiricalJointZero": probability_count(rows, [*base, target]) == 0,
         "solverVariables": n + 1,
         "constraints": transformed_a_ub.shape[0] + transformed_a_eq.shape[0],
         "baseConstraints": len(a_ub),

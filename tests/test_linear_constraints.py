@@ -68,6 +68,25 @@ class LinearConstraintsTest(unittest.TestCase):
         self.assertIsNone(missing)
         self.assertIs(present, self.rule)
 
+    def test_zero_empirical_joint_adds_possible_world_for_the_lp(self) -> None:
+        rows = [
+            {"A": "sim", "B": "nao"},
+            {"A": "nao", "B": "sim"},
+        ]
+        worlds = [{"values": row, "count": 1} for row in rows]
+        completed, added = app.complete_unobserved_query_worlds(
+            worlds,
+            rows,
+            target={"attribute": "A", "value": "sim"},
+            base=[{"attribute": "B", "value": "sim"}],
+        )
+
+        self.assertEqual(added, 1)
+        self.assertEqual(len(completed), 3)
+        self.assertEqual(completed[-1]["count"], 0)
+        self.assertTrue(completed[-1]["queryCompletion"])
+        self.assertEqual(completed[-1]["values"], {"A": "sim", "B": "sim"})
+
     def test_auditable_txt_uses_the_exact_model_solved_by_linprog(self) -> None:
         target = {"attribute": "A", "value": "sim"}
         base = [{"attribute": "B", "value": "sim"}]

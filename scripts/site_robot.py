@@ -181,6 +181,7 @@ def robot_run(
         home_text = html.unescape(home.decode("utf-8", errors="replace"))
         script_text = script.decode("utf-8", errors="replace")
         expected_labels = [
+            "Resultado do programa linear: P(A | B)",
             "Resumo didático",
             "Gerar modelo auditável",
             "Baixar matrizes exatas em TXT",
@@ -252,7 +253,11 @@ def robot_run(
         linear = result.get("linear") or {}
         require(linear.get("ok") is True, f"Solver falhou na consulta sem regra: {linear.get('error')}")
         require(close_to(linear.get("lower"), 0.0), "Limite inferior deveria ser zero")
-        require(close_to(linear.get("upper"), 0.0), "Limite superior deveria ser zero")
+        require(0.0 < float(linear.get("upper", 0.0)) <= 0.005, "Limite superior deveria ser pequeno e maior que zero")
+        require(linear.get("observedWorldVariables") == 466, "Quantidade de mundos observados incorreta")
+        require(linear.get("queryCompletionWorlds") == 243, "Completamentos da consulta deveriam somar 243 mundos")
+        require(linear.get("worldVariables") == 709, "Modelo da consulta deveria usar 709 mundos")
+        require(linear.get("solverVariables") == 710, "Modelo da consulta deveria usar 710 variaveis")
         serialized = json.dumps(result, ensure_ascii=False).lower()
         require("não calculado" not in serialized, "A resposta voltou a usar 'não calculado'")
         require("nao calculado" not in serialized, "A resposta voltou a usar 'nao calculado'")
@@ -268,6 +273,9 @@ def robot_run(
             "count_base": result["countBase"],
             "lower": linear["lower"],
             "upper": linear["upper"],
+            "observed_worlds": linear["observedWorldVariables"],
+            "query_completion_worlds": linear["queryCompletionWorlds"],
+            "solver_variables": linear["solverVariables"],
             "reason": queried_rule.get("reason"),
         }
 
