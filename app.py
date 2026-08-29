@@ -37,6 +37,12 @@ APRIORI_MIN_SUPPORT = 0.01
 APRIORI_MIN_CONFIDENCE = 0.0
 APRIORI_MAX_ITEMSET_SIZE = 3
 APRIORI_RULE_PREVIEW_LIMIT = 50
+# Todas as regras permanecem disponiveis para consulta e auditoria. No PL,
+# entretanto, so confiancas fortes entram como duas desigualdades adicionais.
+# Os suportes de todas as regras continuam sendo incorporados. Esse corte evita
+# milhares de restricoes fracas/redundantes e mantem as rotas dentro do tempo do
+# Render sem fabricar regras nem substituir o solver por uma aproximacao.
+APRIORI_LP_MIN_CONFIDENCE = 0.70
 
 # Solvers realmente executados na comparacao. Todos usam scipy.optimize.linprog,
 # variando o metodo do HiGHS para medir consistencia e tempo.
@@ -618,6 +624,8 @@ def build_linear_constraints(
             rule["support"],
         )
         confidence = rule["confidence"]
+        if confidence < APRIORI_LP_MIN_CONFIDENCE:
+            return
         lower, upper = rounded_interval(confidence)
         antecedent_mask = cached_sparse_mask(antecedent)
         both_mask = cached_sparse_mask(both)
@@ -672,8 +680,8 @@ def build_linear_constraints(
         add_apriori_rule(rule)
 
     # A consulta nao injeta P(A e B) observado como resposta pronta. O solver
-    # infere seus limites usando marginais, conjuntas por pares e todas as
-    # restricoes produzidas pelas regras Apriori.
+    # infere seus limites usando marginais, conjuntas por pares, suportes
+    # Apriori e confiancas das regras fortes.
 
     return a_ub, b_ub, records
 
@@ -901,6 +909,11 @@ def solve_linear_interval(
             "pairwiseJoint": sum(1 for item in records if item["kind"] == "pairwise_joint"),
             "aprioriRuleSupport": sum(1 for item in records if item["kind"] == "apriori_rule_support"),
             "aprioriRuleConfidence": sum(1 for item in records if item["kind"] == "apriori_rule_confidence"),
+            "aprioriRuleConfidenceThreshold": APRIORI_LP_MIN_CONFIDENCE,
+            "aprioriRuleConfidenceFilteredOut": (
+                len(learned_association_rules())
+                - sum(1 for item in records if item["kind"] == "apriori_rule_confidence")
+            ),
             "aprioriRules": len(learned_association_rules()),
         },
         "solver": f"scipy.optimize.linprog {solver_method}",
@@ -947,8 +960,8 @@ def linear_program_text(
         "5. Mineracao Apriori e regras lineares:",
         "  O Apriori recebe os mundos observados de Omega como transacoes ponderadas.",
         "  Para cada regra R -> S gerada, o suporte ancora P(R e S).",
-        "  A confianca ancora P(R e S) = confianca.P(R), em forma linear intervalar.",
-        "  Todas as regras que atingem suporte e confianca minimos entram no LP.",
+        "  Para regras fortes (confianca >= 0.700), a confianca tambem ancora P(R e S) = confianca.P(R).",
+        "  As demais regras continuam visiveis, mas nao acrescentam desigualdades de confianca ao LP.",
         "",
         "6. Papel do lift:",
         "  Lift e apenas uma medida descritiva da associacao retornada pelo Apriori.",
@@ -1146,6 +1159,11 @@ def full_linear_program_text(
                 "status=regra_gerada_pelo_apriori",
                 f"suporte={exact_number(released_rule['support'])}",
                 f"confianca={exact_number(released_rule['confidence'])}",
+                (
+                    "confianca_usada_como_restricao=sim"
+                    if released_rule["confidence"] >= APRIORI_LP_MIN_CONFIDENCE
+                    else "confianca_usada_como_restricao=nao;motivo=abaixo_do_limiar_0.70"
+                ),
                 f"lift_descritivo={exact_number(released_rule['lift'])}",
             ]
         )
@@ -1181,10 +1199,17 @@ def conclusion_text(
             f"e {fmt_probability(lp['upper'])}."
         )
 
+    confidence_sentence = (
+        "O suporte e a confianca foram convertidos em restricoes lineares de probabilidade. "
+        if confidence >= APRIORI_LP_MIN_CONFIDENCE
+        else (
+            "O suporte foi convertido em restricao linear; a confianca permanece descritiva "
+            f"porque e menor que o limiar {APRIORI_LP_MIN_CONFIDENCE:.2f} das regras fortes. "
+        )
+    )
     return (
         f"O Apriori gerou a regra {base_label} -> {target_label} com suporte "
-        f"{support:.3f} e confianca {confidence:.3f}. Esses valores foram convertidos "
-        "em restricoes lineares de probabilidade. "
+        f"{support:.3f} e confianca {confidence:.3f}. {confidence_sentence}"
         f"O lift {fmt_lp_number(lift)} fica apenas como descricao da associacao: nao e "
         "acuracia, nao seleciona a regra e nao entra como coeficiente do programa linear. "
         f"Na base, existem {count_both} ocorrencias conjuntas em {count_base} casos de B."

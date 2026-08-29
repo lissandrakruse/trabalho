@@ -29,6 +29,7 @@ DEFAULT_DATASET = ROOT / "data" / "Crop_recommendation.csv"
 APRIORI_MIN_SUPPORT = 0.01
 APRIORI_MIN_CONFIDENCE = 0.0
 APRIORI_MAX_ITEMSET_SIZE = 3
+APRIORI_LP_MIN_CONFIDENCE = 0.70
 SOLVER_ENGINES = [
     {"id": "highs", "name": "SciPy HiGHS", "method": "highs"},
     {"id": "highs-ds", "name": "HiGHS Dual Simplex", "method": "highs-ds"},
@@ -323,7 +324,7 @@ def build_linear_constraints(
     base: list[dict[str, str]],
 ) -> tuple[list[dict[int, float]], list[float], dict[str, int]]:
     # Monta as mesmas restricoes do projeto principal: marginais, conjuntas por
-    # pares e todas as regras globais geradas pelo Apriori.
+    # pares, suportes Apriori e confiancas das regras fortes.
     rows = data["rows"]
     worlds = data["worlds"]
     a_ub: list[dict[int, float]] = []
@@ -333,6 +334,8 @@ def build_linear_constraints(
         "pairwiseJoint": 0,
         "aprioriRuleSupport": 0,
         "aprioriRuleConfidence": 0,
+        "aprioriRuleConfidenceThreshold": APRIORI_LP_MIN_CONFIDENCE,
+        "aprioriRuleConfidenceFilteredOut": 0,
         "aprioriRules": 0,
     }
     interval_events: set[tuple[tuple[str, str], ...]] = set()
@@ -382,6 +385,9 @@ def build_linear_constraints(
         consequent = rule["consequent"]
         both = [*antecedent, *consequent]
         add_interval("aprioriRuleSupport", both, rule["support"])
+        if rule["confidence"] < APRIORI_LP_MIN_CONFIDENCE:
+            summary["aprioriRuleConfidenceFilteredOut"] += 1
+            return
         lower, upper = rounded_interval(rule["confidence"])
         antecedent_mask = cached_sparse_mask(antecedent)
         both_mask = cached_sparse_mask(both)
@@ -550,7 +556,8 @@ def linear_program_text(
         f"  A e B = {event_key([*base, target])}",
         "",
         "2. Variaveis:",
-        "  Cada mundo possivel w e uma combinacao categorica observada no dataset.",
+        "  Cada mundo possivel w e uma combinacao categorica completa.",
+        "  Mundos observados preservam a contagem; completamentos da consulta tem contagem zero.",
         "  x_w >= 0 representa a massa de probabilidade atribuida ao mundo w.",
         "",
         "3. Normalizacao probabilistica:",
@@ -565,8 +572,9 @@ def linear_program_text(
         "",
         "5. Mineracao Apriori e regras lineares:",
         "  O Apriori recebe os mundos observados de Omega como transacoes ponderadas.",
-        "  Suporte ancora P(R e S) e confianca ancora P(R e S) = confianca.P(R).",
-        "  Confianca e lift nao filtram regras como se fossem medidas de qualidade.",
+        "  Suporte ancora P(R e S) para todas as regras geradas.",
+        "  Confianca ancora P(R e S) = confianca.P(R) quando confianca >= 0.700.",
+        "  Regras abaixo desse limiar continuam visiveis; lift permanece descritivo.",
         "",
         "6. Papel do lift:",
         "  Lift e apenas descritivo: nao mede acuracia e nao entra no LP.",
@@ -632,10 +640,18 @@ def conclusion_text(
             f"e {fmt_probability(lp['upper'])}."
         )
 
+    confidence_sentence = (
+        "suporte e confianca alimentam restricoes probabilisticas"
+        if confidence >= APRIORI_LP_MIN_CONFIDENCE
+        else (
+            "o suporte alimenta as restricoes; a confianca fica descritiva por ser "
+            f"menor que {APRIORI_LP_MIN_CONFIDENCE:.2f}"
+        )
+    )
     return (
         f"O Apriori gerou a regra {base_label} -> {target_label} com suporte "
-        f"{support:.3f} e confianca {confidence:.3f}; ambos alimentam restricoes "
-        f"probabilisticas. O lift {lift:.3f} e apenas descritivo e nao mede acuracia. "
+        f"{support:.3f} e confianca {confidence:.3f}; {confidence_sentence}. "
+        f"O lift {lift:.3f} e apenas descritivo e nao mede acuracia. "
         f"Na base, existem {count_both} ocorrencias conjuntas em {count_base} casos de B."
         f"{interval_sentence}"
     )

@@ -29,7 +29,7 @@ class LinearConstraintsTest(unittest.TestCase):
             "antecedent": [{"attribute": "B", "value": "sim"}],
             "consequent": [{"attribute": "A", "value": "sim"}],
             "support": 0.25,
-            "confidence": 0.5,
+            "confidence": 0.75,
             "lift": 1.0,
         }
 
@@ -53,6 +53,21 @@ class LinearConstraintsTest(unittest.TestCase):
         self.assertEqual(len(a_ub), len(b_ub))
         self.assertTrue(all(isinstance(row, dict) for row in a_ub))
         self.assertFalse(any(kind.startswith("selected") for kind in kinds))
+
+    def test_weak_apriori_confidence_is_not_added_to_the_lp(self) -> None:
+        weak_rule = {**self.rule, "confidence": 0.5}
+        with patch("app.learned_association_rules", return_value=(weak_rule,)):
+            _a_ub, _b_ub, records = app.build_linear_constraints(
+                self.worlds,
+                self.rows,
+                target={"attribute": "A", "value": "sim"},
+                base=[{"attribute": "B", "value": "sim"}],
+            )
+
+        self.assertNotIn(
+            "apriori_rule_confidence",
+            [record["kind"] for record in records],
+        )
 
     def test_query_rule_is_never_fabricated(self) -> None:
         missing = app.query_association_rule(
@@ -90,7 +105,8 @@ class LinearConstraintsTest(unittest.TestCase):
     def test_auditable_txt_uses_the_exact_model_solved_by_linprog(self) -> None:
         target = {"attribute": "A", "value": "sim"}
         base = [{"attribute": "B", "value": "sim"}]
-        with patch("app.learned_association_rules", return_value=(self.rule,)):
+        feasible_rule = {**self.rule, "confidence": 0.5}
+        with patch("app.learned_association_rules", return_value=(feasible_rule,)):
             constraints = app.build_linear_constraints(
                 self.worlds,
                 self.rows,
@@ -100,7 +116,7 @@ class LinearConstraintsTest(unittest.TestCase):
 
         with (
             patch("app.cached_linear_constraint_model", return_value=constraints),
-            patch("app.learned_association_rules", return_value=(self.rule,)),
+            patch("app.learned_association_rules", return_value=(feasible_rule,)),
         ):
             result = app.solve_linear_interval(self.worlds, self.rows, target, base)
             exported = app.full_linear_program_text(

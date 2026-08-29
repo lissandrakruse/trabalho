@@ -43,7 +43,7 @@ O arquivo `scripts/site_robot.py` testa o site como um cliente externo. Ele veri
 - consulta sem regra Apriori, com medidas vazias, explicacao objetiva e limite
   superior pequeno quando `P(A e B)` empirico e zero;
 - comparacao real entre `highs`, `highs-ds` e `highs-ipm`;
-- intervalo do solver, 467 variaveis, 15.018 restricoes e SHA-256 do modelo;
+- intervalo do solver, 467 variaveis, 6.804 restricoes e SHA-256 do modelo;
 - correspondencia entre o modelo resolvido e o TXT auditavel;
 - geracao e cabecalho dos relatorios PDF da consulta e dos solvers.
 

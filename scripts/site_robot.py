@@ -24,7 +24,7 @@ from urllib.request import Request, urlopen
 
 
 DEFAULT_BASE_URL = "https://trabalho-bh30.onrender.com/"
-REFERENCE_DIGEST = "6a366deaf3e50926268e8cb12c3ff30531185c3b65a7f78695bb2c8db093a651"
+REFERENCE_DIGEST = "b5a3fab28e4a5b7d0673779ed6391ac540bc6d4e1ffc676344b75366c39295a0"
 REFERENCE_QUERY = {
     "target": {"attribute": "label", "value": "rice"},
     "conditions": [
@@ -218,11 +218,14 @@ def robot_run(
         require(result.get("countBase") == 218, "Contagem de B diferente de 218")
         require(close_to(result.get("support"), 0.015), "Suporte diferente de 0,015")
         require(close_to(result.get("confidence"), 33 / 218), "Confianca diferente de 33/218")
-        require(close_to(linear.get("lower"), 0.15005815141370793, 1e-8), "Limite inferior inesperado")
-        require(close_to(linear.get("upper"), 0.152, 1e-8), "Limite superior inesperado")
+        require(close_to(linear.get("lower"), 0.14428476583332425, 1e-8), "Limite inferior inesperado")
+        require(close_to(linear.get("upper"), 0.16289922777776156, 1e-8), "Limite superior inesperado")
         require(linear.get("worldVariables") == 466, "Quantidade de variaveis de mundos incorreta")
         require(linear.get("solverVariables") == 467, "Quantidade de variaveis do solver incorreta")
-        require(linear.get("constraints") == 15018, "Quantidade de restricoes incorreta")
+        require(linear.get("constraints") == 6804, "Quantidade de restricoes incorreta")
+        summary = linear.get("constraintSummary") or {}
+        require(summary.get("aprioriRuleConfidence") == 1205, "Quantidade de confiancas fortes incorreta")
+        require(close_to(summary.get("aprioriRuleConfidenceThreshold"), 0.7), "Limiar de confianca do PL incorreto")
         require(linear.get("modelDigest") == REFERENCE_DIGEST, "SHA-256 do modelo diferente da referencia")
         state["query"] = result
         return {
@@ -306,9 +309,9 @@ def robot_run(
             require(engine.get("status") == "ok", f"Metodo {engine.get('method')} falhou")
             require(engine.get("allMatch") is True, f"Metodo {engine.get('method')} divergiu")
             require(engine.get("variables") == 467, f"Metodo {engine.get('method')} nao usou 467 variaveis")
-            require(engine.get("constraints") == 15018, f"Metodo {engine.get('method')} nao usou 15.018 restricoes")
-            require(close_to(engine.get("lower"), 0.15005815141370793, 1e-8), f"Limite inferior divergente em {engine.get('method')}")
-            require(close_to(engine.get("upper"), 0.152, 1e-8), f"Limite superior divergente em {engine.get('method')}")
+            require(engine.get("constraints") == 6804, f"Metodo {engine.get('method')} nao usou 6.804 restricoes")
+            require(close_to(engine.get("lower"), 0.14428476583332425, 1e-8), f"Limite inferior divergente em {engine.get('method')}")
+            require(close_to(engine.get("upper"), 0.16289922777776156, 1e-8), f"Limite superior divergente em {engine.get('method')}")
         state["solver_comparison"] = result
         return {
             "all_match": True,
@@ -338,7 +341,7 @@ def robot_run(
             require(generated.get("ok") is True, f"Geracao do TXT falhou: {generated.get('error')}")
             require(generated.get("modelDigest") == query["linear"]["modelDigest"], "TXT e solver possuem SHA-256 diferentes")
             require(generated.get("solverVariables") == 467, "TXT nao registra 467 variaveis")
-            require(generated.get("constraints") == 15018, "TXT nao registra 15.018 restricoes")
+            require(generated.get("constraints") == 6804, "TXT nao registra 6.804 restricoes")
             txt, _ = client.request(generated.get("downloadUrl") or generated["fileUrl"])
             text = txt.decode("utf-8", errors="strict")
             require(len(txt) > 1_000_000, "TXT auditavel esta pequeno demais")

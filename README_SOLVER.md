@@ -50,13 +50,16 @@ confiança mínima = 0,000
 tamanho máximo do itemset = 3
 ```
 
-A confiança mínima é zero de propósito: confiança e lift não são usados para
-filtrar regras como se medissem qualidade. O único corte é o suporte mínimo,
-necessário para definir os itemsets frequentes do Apriori.
+A confiança mínima da mineração é zero de propósito: nenhuma regra com suporte
+frequente é escondida da consulta ou da auditoria. Para o programa linear, há
+um segundo critério explícito: somente regras fortes, com confiança maior ou
+igual a 0,70, acrescentam desigualdades de confiança.
 
 Para cada itemset frequente de tamanho 2 ou 3, são geradas regras com consequente
-unitário. Todas as regras geradas são incorporadas ao modelo. A ordenação da
-lista é apenas determinística e não representa ranking.
+unitário. Os suportes de todas as regras geradas são incorporados ao modelo;
+1.205 das 5.312 regras também fornecem as desigualdades de confiança por
+atingirem o limiar de 0,70. A ordenação da lista é apenas determinística e não
+representa ranking.
 
 ### 4. Regras viram restrições lineares
 
@@ -74,7 +77,7 @@ O suporte produz uma restrição intervalar direta:
 L_s <= P(R e S) <= U_s
 ```
 
-A confiança produz duas desigualdades lineares:
+A confiança das regras fortes produz duas desigualdades lineares:
 
 ```text
 P(R e S) - U_c P(R) <= 0
@@ -129,12 +132,15 @@ max P(A | B)
 ```
 
 O solver principal é `scipy.optimize.linprog` com o método `highs-ipm` do
-HiGHS. A matriz de restrições é esparsa para comportar todas as regras Apriori
-sem consumo excessivo de memória. As máscaras de eventos são reutilizadas e o
+HiGHS. A matriz de restrições é esparsa para comportar os suportes Apriori e as
+confianças fortes sem consumo excessivo de memória. As máscaras de eventos são
+reutilizadas e o
 sistema global de restrições fica em cache por processo, pois ele depende do
-dataset e não da consulta escolhida. Essa otimização reduz o tempo de resposta
-no Render sem remover nenhuma das 5.312 regras. A comparação também executa
-`highs`, `highs-ds` e `highs-ipm`.
+dataset e não da consulta escolhida. As 5.312 regras permanecem disponíveis;
+o PL evita apenas as 4.107 desigualdades de confiança fracas e redundantes.
+Essa seleção reduz a formulação para 6.804 restrições e mantém as rotas dentro
+do tempo de resposta do Render. A comparação também executa `highs`,
+`highs-ds` e `highs-ipm`.
 
 ### 8. Resumo didático e TXT numérico auditável
 
