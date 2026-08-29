@@ -274,6 +274,18 @@ def robot_run(
     checks.append(run_check("consulta_sem_regra_apriori", check_missing_rule))
 
     def check_solver_comparison() -> dict[str, Any]:
+        prepared_methods = []
+        for method in ("highs", "highs-ds"):
+            prepared = client.json(
+                "/api/solver/run",
+                method="POST",
+                payload={**REFERENCE_QUERY, "solverMethod": method},
+            )
+            require(prepared.get("ok") is True, f"Preparacao do metodo {method} falhou: {prepared.get('error')}")
+            prepared_engine = prepared.get("solverEngineResult") or {}
+            require(prepared_engine.get("status") == "ok", f"Metodo preparado {method} falhou")
+            require(prepared_engine.get("method") == method, f"Metodo preparado incorreto: {method}")
+            prepared_methods.append(method)
         result = client.json("/api/solver/compare", method="POST", payload=REFERENCE_QUERY)
         require(result.get("ok") is True, f"Comparacao dos solvers falhou: {result.get('error')}")
         comparison = result.get("comparison") or {}
@@ -292,6 +304,7 @@ def robot_run(
         state["solver_comparison"] = result
         return {
             "all_match": True,
+            "prepared_methods": prepared_methods,
             "engines": [
                 {
                     "method": engine["method"],

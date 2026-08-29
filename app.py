@@ -1419,14 +1419,49 @@ def solver_engine_summary(
     }
 
 
-def _build_solver_comparison_uncached(payload: dict[str, Any]) -> dict[str, Any]:
-    main_result = compute_query(payload)
+def solver_engine_for_method(method: str) -> dict[str, str]:
+    for engine in SOLVER_ENGINES:
+        if engine["method"] == method:
+            return engine
+    valid_methods = ", ".join(engine["method"] for engine in SOLVER_ENGINES)
+    raise ValueError(f"Metodo de solver invalido: {method}. Use: {valid_methods}")
 
+
+@lru_cache(maxsize=48)
+def _cached_standalone_solver_result(
+    payload_json: str,
+    solver_method: str,
+    solver_name: str,
+) -> dict[str, Any]:
     from scripts import solve_query as standalone_solver
 
+    payload = json.loads(payload_json)
     solver_data = standalone_solver.load_dataset(standalone_solver.DEFAULT_DATASET)
-    solver_target = standalone_solver.validate_conditions([main_result["target"]], solver_data["domains"])[0]
-    solver_conditions = standalone_solver.validate_conditions(main_result["conditions"], solver_data["domains"])
+    solver_target = standalone_solver.validate_conditions(
+        [payload.get("target", {})],
+        solver_data["domains"],
+    )[0]
+    solver_conditions = standalone_solver.validate_conditions(
+        payload.get("conditions", []),
+        solver_data["domains"],
+    )
+    return standalone_solver.compute_query(
+        solver_data,
+        solver_target,
+        solver_conditions,
+        solver_method=solver_method,
+        solver_name=solver_name,
+    )
+
+
+def _build_solver_comparison_uncached(payload: dict[str, Any]) -> dict[str, Any]:
+    main_result = compute_query(payload)
+    normalized_payload_json = json.dumps(
+        {"target": main_result["target"], "conditions": main_result["conditions"]},
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
     engine_results = []
     default_solver_result = None
     for engine in SOLVER_ENGINES:
@@ -1436,21 +1471,19 @@ def _build_solver_comparison_uncached(payload: dict[str, Any]) -> dict[str, Any]
         if engine["method"] == main_result.get("linear", {}).get("solverMethod"):
             solver_result = main_result
         else:
-            solver_result = standalone_solver.compute_query(
-                solver_data,
-                solver_target,
-                solver_conditions,
-                solver_method=engine["method"],
-                solver_name=engine["name"],
+            solver_result = _cached_standalone_solver_result(
+                normalized_payload_json,
+                engine["method"],
+                engine["name"],
             )
         if engine["id"] == "highs":
             default_solver_result = solver_result
         engine_results.append(solver_engine_summary(engine, main_result, solver_result))
 
-    solver_result = default_solver_result or standalone_solver.compute_query(
-        solver_data,
-        solver_target,
-        solver_conditions,
+    solver_result = default_solver_result or _cached_standalone_solver_result(
+        normalized_payload_json,
+        "highs",
+        "SciPy HiGHS",
     )
 
     return {
@@ -1546,6 +1579,40 @@ def solver_compare():
         return jsonify({"ok": False, "error": f"Solver separado indisponivel: {error}"}), 500
 
     return jsonify(result)
+
+
+@app.post("/api/solver/run")
+def solver_run():
+    """Executa um metodo por requisicao para respeitar o limite do Render."""
+    try:
+        payload = request.get_json(force=True)
+        solver_method = str(payload.get("solverMethod", ""))
+        engine = solver_engine_for_method(solver_method)
+        query_payload = {
+            "target": payload.get("target", {}),
+            "conditions": payload.get("conditions", []),
+        }
+        main_result = compute_query(query_payload)
+        normalized_payload_json = json.dumps(
+            {"target": main_result["target"], "conditions": main_result["conditions"]},
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        if solver_method == main_result.get("linear", {}).get("solverMethod"):
+            solver_result = main_result
+        else:
+            solver_result = _cached_standalone_solver_result(
+                normalized_payload_json,
+                engine["method"],
+                engine["name"],
+            )
+        summary = solver_engine_summary(engine, main_result, solver_result)
+    except ValueError as error:
+        return jsonify({"ok": False, "error": str(error)}), 400
+    except Exception as error:
+        return jsonify({"ok": False, "error": f"Erro ao executar metodo do solver: {error}"}), 500
+    return jsonify({"ok": True, "solverEngineResult": summary})
 
 
 def format_report_probability(value: float | None) -> str:

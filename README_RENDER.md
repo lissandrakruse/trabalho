@@ -73,3 +73,8 @@ cache e e reutilizado quando a comparacao recebe a mesma consulta. O limite de
 360 segundos do Gunicorn contempla a primeira execucao em instancias gratuitas
 do Render e a reutilizacao mantem o caminho normal abaixo de limites menores
 configurados diretamente no painel do servico.
+
+Na interface, a comparacao e dividida em tres requisicoes: primeiro o
+HiGHS-IPM do projeto principal, depois `highs` e `highs-ds` pelo script separado.
+Cada metodo termina dentro do limite individual do servico; a rota comparativa e
+o PDF apenas reunem os resultados reais ja calculados.

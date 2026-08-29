@@ -253,7 +253,7 @@ function renderSolverComparison(result) {
   solverComparison.innerHTML = [
     `<p>${escapeHtml(result.message)}</p>`,
     engineRows.length
-      ? `<h3>Comparacao entre 3 metodos de solver executados</h3><p>Os tres metodos abaixo foram executados de verdade pelo script separado <strong>scripts/solve_query.py</strong>, usando exatamente o mesmo A e o mesmo B escolhidos na interface.</p><table><thead><tr><th>Solver</th><th>Metodo SciPy</th><th>Suporte</th><th>Confianca</th><th>Lift</th><th>Intervalo</th><th>Variaveis</th><th>Restricoes</th><th>Tempo (s)</th><th>Status</th></tr></thead><tbody>${engineRows.join("")}</tbody></table>`
+      ? `<h3>Comparacao entre 3 metodos de solver executados</h3><p>Os tres metodos abaixo foram executados de verdade com exatamente o mesmo A e o mesmo B escolhidos na interface. O HiGHS-IPM vem do projeto principal; HiGHS automatico e Dual Simplex sao executados pelo script separado <strong>scripts/solve_query.py</strong>.</p><table><thead><tr><th>Solver</th><th>Metodo SciPy</th><th>Suporte</th><th>Confianca</th><th>Lift</th><th>Intervalo</th><th>Variaveis</th><th>Restricoes</th><th>Tempo (s)</th><th>Status</th></tr></thead><tbody>${engineRows.join("")}</tbody></table>`
       : "",
     catalogRows.length
       ? `<h3>Solvers considerados</h3><table><thead><tr><th>Solver</th><th>Status</th><th>Comparacao</th></tr></thead><tbody>${catalogRows.join("")}</tbody></table>`
@@ -442,12 +442,14 @@ async function generateSolverReport() {
   solverComparison.innerHTML = "";
   downloadSolverReportLink.classList.add("is-hidden");
   const reportWindow = window.open("", "_blank", "noopener");
+  const payload = buildPayload();
 
   try {
+    await prepareSolverComparison(payload);
     const response = await fetch("/api/report/solver-comparison", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(buildPayload()),
+      body: JSON.stringify(payload),
     });
     const result = await readJsonResponse(response);
     if (!response.ok || !result.ok) throw new Error(result.error || "Erro ao gerar comparativo.");
@@ -471,6 +473,28 @@ async function generateSolverReport() {
   }
 }
 
+async function postSolverStage(path, payload) {
+  const response = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const result = await readJsonResponse(response);
+  if (!response.ok || !result.ok) throw new Error(result.error || "Erro ao executar etapa do solver.");
+  return result;
+}
+
+async function prepareSolverComparison(payload) {
+  // Cada metodo fica em uma requisicao propria. Assim os tres solvers sao
+  // realmente executados sem que uma unica requisicao ultrapasse o limite do Render.
+  solverCompareStatus.textContent = "Etapa 1/3: HiGHS-IPM principal";
+  await postSolverStage("/api/query", payload);
+  solverCompareStatus.textContent = "Etapa 2/3: HiGHS automatico separado";
+  await postSolverStage("/api/solver/run", { ...payload, solverMethod: "highs" });
+  solverCompareStatus.textContent = "Etapa 3/3: Dual Simplex separado";
+  await postSolverStage("/api/solver/run", { ...payload, solverMethod: "highs-ds" });
+}
+
 async function compareSolver() {
   // Botao "Resolver Solver Separado": compara o resultado principal com o
   // script independente scripts/solve_query.py sem gerar PDF.
@@ -478,12 +502,14 @@ async function compareSolver() {
   compareSolverButton.textContent = "Resolvendo...";
   solverCompareStatus.textContent = "Executando solver";
   solverComparison.innerHTML = "";
+  const payload = buildPayload();
 
   try {
+    await prepareSolverComparison(payload);
     const response = await fetch("/api/solver/compare", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(buildPayload()),
+      body: JSON.stringify(payload),
     });
     const result = await readJsonResponse(response);
     if (!response.ok || !result.ok) throw new Error(result.error || "Erro ao comparar solver.");
