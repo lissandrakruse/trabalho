@@ -38,7 +38,7 @@ jobs:
       - name: Executar robo no Render
         shell: bash
         run: |
-          ARGS=(--base-url "${{ inputs.base_url }}" --output artifacts/robot-test-report.json)
+          ARGS=(--base-url "${{ inputs.base_url }}" --timeout 420 --output artifacts/robot-test-report.json)
           if [[ "${{ inputs.quick }}" == "true" ]]; then
             ARGS+=(--quick)
           fi

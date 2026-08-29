@@ -63,9 +63,9 @@ SOLVER_ENGINES = [
         "name": "HiGHS Interior Point",
         "method": "highs-ipm",
         "engine": "scipy.optimize.linprog(method='highs-ipm')",
-        "status": "Executado no projeto principal e no script separado",
+        "status": "Executado no projeto principal",
         "comparison": "Comparacao de metricas contra a mesma consulta da interface",
-        "notes": "Usa o metodo de pontos interiores do HiGHS.",
+        "notes": "Usa o metodo de pontos interiores do HiGHS; o resultado principal e reaproveitado na tabela comparativa.",
     },
 ]
 DOCUMENTED_SOLVERS = [
@@ -1387,7 +1387,7 @@ def solver_engine_summary(
     }
 
 
-def build_solver_comparison(payload: dict[str, Any]) -> dict[str, Any]:
+def _build_solver_comparison_uncached(payload: dict[str, Any]) -> dict[str, Any]:
     main_result = compute_query(payload)
 
     from scripts import solve_query as standalone_solver
@@ -1398,13 +1398,19 @@ def build_solver_comparison(payload: dict[str, Any]) -> dict[str, Any]:
     engine_results = []
     default_solver_result = None
     for engine in SOLVER_ENGINES:
-        solver_result = standalone_solver.compute_query(
-            solver_data,
-            solver_target,
-            solver_conditions,
-            solver_method=engine["method"],
-            solver_name=engine["name"],
-        )
+        # O projeto principal ja executou de fato o HiGHS-IPM acima. Reutilizar
+        # esse resultado evita resolver os mesmos dois PLs uma quarta vez sem
+        # retirar nenhum dos tres metodos reais da comparacao.
+        if engine["method"] == main_result.get("linear", {}).get("solverMethod"):
+            solver_result = main_result
+        else:
+            solver_result = standalone_solver.compute_query(
+                solver_data,
+                solver_target,
+                solver_conditions,
+                solver_method=engine["method"],
+                solver_name=engine["name"],
+            )
         if engine["id"] == "highs":
             default_solver_result = solver_result
         engine_results.append(solver_engine_summary(engine, main_result, solver_result))
@@ -1425,6 +1431,19 @@ def build_solver_comparison(payload: dict[str, Any]) -> dict[str, Any]:
         "solverCatalog": solver_catalog(),
         "message": "Comparacao executada com 3 metodos reais do HiGHS: highs, highs-ds e highs-ipm, todos usando os mesmos parametros escolhidos na interface.",
     }
+
+
+@lru_cache(maxsize=16)
+def _cached_solver_comparison(payload_json: str) -> dict[str, Any]:
+    return _build_solver_comparison_uncached(json.loads(payload_json))
+
+
+def build_solver_comparison(payload: dict[str, Any]) -> dict[str, Any]:
+    # O botao de comparacao e o PDF normalmente recebem a mesma consulta em
+    # sequencia. A chave canonica permite que o PDF reutilize os tres resultados
+    # ja calculados, em vez de repetir uma operacao pesada no Render gratuito.
+    payload_json = json.dumps(payload, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+    return _cached_solver_comparison(payload_json)
 
 
 @app.post("/api/query")

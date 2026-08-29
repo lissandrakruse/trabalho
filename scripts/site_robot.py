@@ -367,7 +367,7 @@ def robot_run(client: SiteClient, wait_seconds: int, include_artifacts: bool) ->
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Testa a aplicacao Probabilidades do Solo como um robo HTTP.")
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL, help="Endereco da aplicacao")
-    parser.add_argument("--timeout", type=float, default=180.0, help="Timeout de cada requisicao em segundos")
+    parser.add_argument("--timeout", type=float, default=420.0, help="Timeout de cada requisicao em segundos")
     parser.add_argument("--wait-seconds", type=int, default=300, help="Tempo para aguardar o Render acordar")
     parser.add_argument("--quick", action="store_true", help="Nao gera o TXT grande nem o PDF")
     parser.add_argument("--output", type=Path, default=Path("robot-test-report.json"), help="Arquivo JSON de evidencias")

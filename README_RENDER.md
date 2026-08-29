@@ -16,7 +16,7 @@ Se criar como **Web Service**:
 ```text
 Runtime: Python
 Build Command: python -m pip install --upgrade pip setuptools wheel && python -m pip install -r requirements.txt
-Start Command: gunicorn app:app --bind 0.0.0.0:$PORT --timeout 120
+Start Command: gunicorn app:app --bind 0.0.0.0:$PORT --timeout 360
 ```
 
 O projeto fixa Python em `.python-version`:
@@ -57,3 +57,12 @@ python scripts/site_robot.py \
 Use `--quick` para testar sem gerar o TXT e o PDF. O processo termina com codigo 1 se alguma verificacao falhar e sempre grava as evidencias em JSON.
 
 No GitHub, a acao **Robo de teste do site** pode ser iniciada manualmente na aba **Actions**. Ao final, ela disponibiliza o arquivo `robot-test-report.json` como artefato da execucao.
+
+## Desempenho da comparacao
+
+A primeira comparacao executa os tres metodos reais do HiGHS. O resultado do
+HiGHS-IPM, ja produzido pelo projeto principal, e reaproveitado na tabela, e os
+outros dois metodos sao executados pelo script separado. A comparacao fica em
+cache por consulta para que a geracao posterior do PDF nao resolva novamente os
+mesmos programas lineares. O limite de 360 segundos do Gunicorn contempla a
+primeira execucao em instancias gratuitas do Render.

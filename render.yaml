@@ -5,7 +5,7 @@ services:
     plan: free
     healthCheckPath: /healthz
     buildCommand: python -m pip install --upgrade pip setuptools wheel && python -m pip install -r requirements.txt
-    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --timeout 120
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --timeout 360
     autoDeploy: true
     envVars:
       - key: PYTHON_VERSION
