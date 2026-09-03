@@ -461,7 +461,10 @@ def solve_linear_interval(
 
     worlds, completion_count = complete_unobserved_query_worlds(data, target, base)
     n = len(worlds)
-    if data.get("datasetPath") == str(DEFAULT_DATASET.resolve()) and completion_count == 0:
+    prepared_model = data.get("preparedLinearConstraintModel")
+    if prepared_model is not None and completion_count == 0:
+        a_ub, b_ub, summary = prepared_model
+    elif data.get("datasetPath") == str(DEFAULT_DATASET.resolve()) and completion_count == 0:
         a_ub, b_ub, summary = cached_linear_constraint_model()
     else:
         model_data = {**data, "worlds": worlds}

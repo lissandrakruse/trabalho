@@ -99,6 +99,13 @@ HiGHS-IPM do projeto principal, depois `highs` e `highs-ds` pelo script separado
 Cada metodo termina dentro do limite individual do servico; a rota comparativa e
 o PDF apenas reunem os resultados reais ja calculados.
 
+Para nao minerar as mesmas 5.312 regras em cada requisicao, o processo web
+reutiliza a categorizacao e a saida Apriori ja verificadas. O modulo
+`scripts/solve_query.py` continua montando sua propria matriz de restricoes; ela
+e preparada uma vez e reaproveitada entre os metodos. O robo repete respostas
+POST quando Cloudflare devolve transitoriamente 502/520 e reprova se a resposta
+continuar indisponivel depois das tentativas.
+
 A primeira selecao ativa da consulta de referencia leva alguns segundos porque
 resolve os extremos iniciais e atualiza somente os que forem violados. O
 resultado completo fica em cache por consulta e configuracao; o PDF da selecao

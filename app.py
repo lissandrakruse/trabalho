@@ -7,9 +7,11 @@ import json
 import math
 import os
 import time
+from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
+from threading import Lock
 from typing import Any
 
 from flask import Flask, jsonify, request, send_from_directory
@@ -117,6 +119,13 @@ KNOWN_LABELS = {
     "rainfall": "Chuva",
     "label": "Cultura",
 }
+
+# Os metodos simplex podem ultrapassar o limite de uma unica resposta HTTP no
+# Render gratuito. Um job em segundo plano preserva a execucao real do HiGHS e
+# deixa a interface consultar o estado sem manter a conexao aberta.
+SOLVER_JOB_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="solver-comparison")
+SOLVER_JOB_LOCK = Lock()
+SOLVER_JOBS: dict[str, Future[dict[str, Any]]] = {}
 
 app = Flask(__name__, static_folder=None)
 
@@ -1767,6 +1776,32 @@ def solver_engine_for_method(method: str) -> dict[str, str]:
     raise ValueError(f"Metodo de solver invalido: {method}. Use: {valid_methods}")
 
 
+@lru_cache(maxsize=1)
+def _prepared_standalone_solver_data() -> dict[str, Any]:
+    """Prepara uma vez a entrada do solver independente no processo web.
+
+    A construcao das linhas continua sendo executada pelo codigo independente
+    de ``scripts/solve_query.py``. Reutilizamos somente o dataset categorizado e
+    as regras Apriori ja carregadas pela aplicacao; isso evita minerar as mesmas
+    5.312 regras novamente em cada metodo no Render gratuito.
+    """
+
+    from scripts import solve_query as standalone_solver
+
+    project_data = load_dataset()
+    prepared = {
+        **project_data,
+        "datasetPath": "app-cache://Crop_recommendation.csv",
+        "apriori": learned_association_mining(),
+    }
+    prepared["preparedLinearConstraintModel"] = standalone_solver.build_linear_constraints(
+        prepared,
+        {},
+        [],
+    )
+    return prepared
+
+
 @lru_cache(maxsize=48)
 def _cached_standalone_solver_result(
     payload_json: str,
@@ -1776,7 +1811,7 @@ def _cached_standalone_solver_result(
     from scripts import solve_query as standalone_solver
 
     payload = json.loads(payload_json)
-    solver_data = standalone_solver.load_dataset(standalone_solver.DEFAULT_DATASET)
+    solver_data = _prepared_standalone_solver_data()
     solver_target = standalone_solver.validate_conditions(
         [payload.get("target", {})],
         solver_data["domains"],
@@ -1943,38 +1978,96 @@ def solver_compare():
     return jsonify(result)
 
 
+def execute_solver_method(payload: dict[str, Any]) -> dict[str, Any]:
+    solver_method = str(payload.get("solverMethod", ""))
+    engine = solver_engine_for_method(solver_method)
+    query_payload = {
+        "target": payload.get("target", {}),
+        "conditions": payload.get("conditions", []),
+    }
+    main_result = compute_query(query_payload)
+    normalized_payload_json = json.dumps(
+        {"target": main_result["target"], "conditions": main_result["conditions"]},
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    if solver_method == main_result.get("linear", {}).get("solverMethod"):
+        solver_result = main_result
+    else:
+        solver_result = _cached_standalone_solver_result(
+            normalized_payload_json,
+            engine["method"],
+            engine["name"],
+        )
+    return {
+        "ok": True,
+        "solverEngineResult": solver_engine_summary(engine, main_result, solver_result),
+    }
+
+
+def solver_job_snapshot(job_id: str, future: Future[dict[str, Any]]) -> tuple[dict[str, Any], int]:
+    if not future.done():
+        return {
+            "ok": True,
+            "status": "running",
+            "jobId": job_id,
+            "pollUrl": f"/api/solver/job/{job_id}",
+        }, 202
+    try:
+        result = future.result()
+    except Exception as error:  # noqa: BLE001 - erro precisa chegar a interface
+        return {
+            "ok": False,
+            "status": "failed",
+            "jobId": job_id,
+            "error": f"Erro ao executar metodo do solver: {error}",
+        }, 500
+    return {**result, "status": "completed", "jobId": job_id}, 200
+
+
+def submit_solver_job(payload: dict[str, Any]) -> tuple[str, Future[dict[str, Any]]]:
+    canonical = json.dumps(payload, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+    job_id = hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:24]
+    with SOLVER_JOB_LOCK:
+        future = SOLVER_JOBS.get(job_id)
+        if future is None:
+            future = SOLVER_JOB_EXECUTOR.submit(execute_solver_method, payload)
+            SOLVER_JOBS[job_id] = future
+    return job_id, future
+
+
 @app.post("/api/solver/run")
 def solver_run():
-    """Executa um metodo por requisicao para respeitar o limite do Render."""
+    """Executa sincronamente ou inicia um job curto de acompanhar por polling."""
     try:
         payload = request.get_json(force=True)
-        solver_method = str(payload.get("solverMethod", ""))
-        engine = solver_engine_for_method(solver_method)
-        query_payload = {
-            "target": payload.get("target", {}),
-            "conditions": payload.get("conditions", []),
-        }
-        main_result = compute_query(query_payload)
-        normalized_payload_json = json.dumps(
-            {"target": main_result["target"], "conditions": main_result["conditions"]},
-            ensure_ascii=True,
-            sort_keys=True,
-            separators=(",", ":"),
-        )
-        if solver_method == main_result.get("linear", {}).get("solverMethod"):
-            solver_result = main_result
-        else:
-            solver_result = _cached_standalone_solver_result(
-                normalized_payload_json,
-                engine["method"],
-                engine["name"],
-            )
-        summary = solver_engine_summary(engine, main_result, solver_result)
+        solver_engine_for_method(str(payload.get("solverMethod", "")))
+        if payload.get("async") is True:
+            job_payload = {
+                "target": payload.get("target", {}),
+                "conditions": payload.get("conditions", []),
+                "solverMethod": payload.get("solverMethod"),
+            }
+            job_id, future = submit_solver_job(job_payload)
+            response, status = solver_job_snapshot(job_id, future)
+            return jsonify(response), status
+        result = execute_solver_method(payload)
     except ValueError as error:
         return jsonify({"ok": False, "error": str(error)}), 400
     except Exception as error:
         return jsonify({"ok": False, "error": f"Erro ao executar metodo do solver: {error}"}), 500
-    return jsonify({"ok": True, "solverEngineResult": summary})
+    return jsonify(result)
+
+
+@app.get("/api/solver/job/<job_id>")
+def solver_job(job_id: str):
+    with SOLVER_JOB_LOCK:
+        future = SOLVER_JOBS.get(job_id)
+    if future is None:
+        return jsonify({"ok": False, "error": "Job de solver nao encontrado."}), 404
+    response, status = solver_job_snapshot(job_id, future)
+    return jsonify(response), status
 
 
 def format_report_probability(value: float | None) -> str:
@@ -2406,6 +2499,13 @@ def write_solver_comparison_report(result: dict[str, Any]) -> None:
             "O projeto principal calcula as probabilidades pela API Flask da interface. "
             "O solver separado executa o modulo scripts/solve_query.py, usando o mesmo dataset, "
             "a mesma categorizacao e o solver HiGHS via scipy.optimize.linprog.",
+            body,
+        ),
+        Paragraph(
+            "No servico web, a categorizacao e as 5.312 regras Apriori ja carregadas sao "
+            "reutilizadas para evitar trabalho duplicado. O modulo independente ainda monta "
+            "e confere sua propria matriz de restricoes uma vez; essa matriz fica em cache para "
+            "que os metodos highs e highs-ds terminem dentro do limite do Render.",
             body,
         ),
         Paragraph(

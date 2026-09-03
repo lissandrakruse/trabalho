@@ -803,15 +803,29 @@ async function postSolverStage(path, payload) {
   return result;
 }
 
+async function runSolverJob(payload) {
+  let result = await postSolverStage("/api/solver/run", { ...payload, async: true });
+  const deadline = Date.now() + 10 * 60 * 1000;
+  while (result.status === "running") {
+    if (Date.now() >= deadline) throw new Error("O solver excedeu dez minutos de execucao.");
+    await new Promise((resolve) => window.setTimeout(resolve, 3000));
+    const response = await fetch(result.pollUrl, { headers: { Accept: "application/json" } });
+    result = await readJsonResponse(response);
+    if (!response.ok || !result.ok) throw new Error(result.error || "Erro ao acompanhar o solver.");
+  }
+  if (result.status !== "completed") throw new Error(result.error || "O solver nao foi concluido.");
+  return result;
+}
+
 async function prepareSolverComparison(payload) {
-  // Cada metodo fica em uma requisicao propria. Assim os tres solvers sao
-  // realmente executados sem que uma unica requisicao ultrapasse o limite do Render.
+  // Os metodos demorados rodam em jobs reais do servidor; o navegador consulta
+  // o estado sem manter uma unica conexao aberta alem do limite do Render.
   solverCompareStatus.textContent = "Etapa 1/3: HiGHS-IPM principal";
   await postSolverStage("/api/query", payload);
   solverCompareStatus.textContent = "Etapa 2/3: HiGHS automatico separado";
-  await postSolverStage("/api/solver/run", { ...payload, solverMethod: "highs" });
+  await runSolverJob({ ...payload, solverMethod: "highs" });
   solverCompareStatus.textContent = "Etapa 3/3: Dual Simplex separado";
-  await postSolverStage("/api/solver/run", { ...payload, solverMethod: "highs-ds" });
+  await runSolverJob({ ...payload, solverMethod: "highs-ds" });
 }
 
 async function compareSolver() {

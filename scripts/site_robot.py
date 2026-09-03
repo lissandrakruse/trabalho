@@ -94,20 +94,30 @@ class SiteClient:
             body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
             headers["Content-Type"] = "application/json"
 
-        request = Request(
-            urljoin(self.base_url, path.lstrip("/")),
-            data=body,
-            headers=headers,
-            method=method,
-        )
-        try:
-            with urlopen(request, timeout=self.timeout) as response:
-                return response.read(), dict(response.headers.items())
-        except HTTPError as error:
-            detail = error.read().decode("utf-8", errors="replace")[:1000]
-            raise RobotFailure(f"HTTP {error.code} em {path}: {detail}") from error
-        except (URLError, TimeoutError) as error:
-            raise RobotFailure(f"Falha de conexao em {path}: {error}") from error
+        retryable_statuses = {429, 500, 502, 503, 504, 520, 522, 524}
+        retry_delays = (10, 30)
+        last_error: Exception | None = None
+        for attempt in range(len(retry_delays) + 1):
+            request = Request(
+                urljoin(self.base_url, path.lstrip("/")),
+                data=body,
+                headers=headers,
+                method=method,
+            )
+            try:
+                with urlopen(request, timeout=self.timeout) as response:
+                    return response.read(), dict(response.headers.items())
+            except HTTPError as error:
+                detail = error.read().decode("utf-8", errors="replace")[:1000]
+                last_error = RobotFailure(f"HTTP {error.code} em {path}: {detail}")
+                if error.code not in retryable_statuses or attempt >= len(retry_delays):
+                    raise last_error from error
+            except (URLError, TimeoutError) as error:
+                last_error = RobotFailure(f"Falha de conexao em {path}: {error}")
+                if attempt >= len(retry_delays):
+                    raise last_error from error
+            time.sleep(retry_delays[attempt])
+        raise RobotFailure(f"Falha de conexao em {path}: {last_error}")
 
     def json(
         self,
@@ -183,6 +193,21 @@ def robot_run(
 ) -> dict[str, Any]:
     state: dict[str, Any] = {}
     checks: list[CheckResult] = []
+
+    def execute_solver_job(method: str) -> dict[str, Any]:
+        result = client.json(
+            "/api/solver/run",
+            method="POST",
+            payload={**REFERENCE_QUERY, "solverMethod": method, "async": True},
+        )
+        deadline = time.monotonic() + 10 * 60
+        while result.get("status") == "running":
+            if time.monotonic() >= deadline:
+                raise RobotFailure(f"Job do metodo {method} excedeu dez minutos.")
+            time.sleep(3)
+            result = client.json(str(result.get("pollUrl") or ""))
+        require(result.get("status") == "completed", f"Job do metodo {method} nao concluiu")
+        return result
 
     checks.append(
         run_check(
@@ -394,11 +419,7 @@ def robot_run(
     def check_solver_comparison() -> dict[str, Any]:
         prepared_methods = []
         for method in ("highs", "highs-ds"):
-            prepared = client.json(
-                "/api/solver/run",
-                method="POST",
-                payload={**REFERENCE_QUERY, "solverMethod": method},
-            )
+            prepared = execute_solver_job(method)
             require(prepared.get("ok") is True, f"Preparacao do metodo {method} falhou: {prepared.get('error')}")
             prepared_engine = prepared.get("solverEngineResult") or {}
             require(prepared_engine.get("status") == "ok", f"Metodo preparado {method} falhou")
