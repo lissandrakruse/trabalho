@@ -57,7 +57,7 @@ class VoiIntegrationTest(unittest.TestCase):
     def test_active_selection_reduces_interval_and_prunes_lp_solves(self) -> None:
         result = app.compute_active_selection(
             {
-                "target": {"attribute": "label", "value": "rice"},
+                "target": {"attribute": "label", "value": "apple"},
                 "conditions": [
                     {"attribute": "ph", "value": "acido"},
                     {"attribute": "rainfall", "value": "alto"},
@@ -68,10 +68,10 @@ class VoiIntegrationTest(unittest.TestCase):
             }
         )
 
-        self.assertEqual(result["selectedCount"], 25)
-        self.assertEqual(result["candidatePool"]["evaluated"], 52)
-        self.assertAlmostEqual(result["baseModel"]["width"], 0.023265306122449037)
-        self.assertAlmostEqual(result["activeSelection"]["width"], 0.019084049685785698)
+        self.assertEqual(result["selectedCount"], 23)
+        self.assertEqual(result["candidatePool"]["evaluated"], 46)
+        self.assertAlmostEqual(result["baseModel"]["width"], 0.21701477888077153)
+        self.assertAlmostEqual(result["activeSelection"]["width"], 0.023055963110458988)
         self.assertGreater(
             result["baselines"]["random"]["meanWidth"],
             result["activeSelection"]["width"],

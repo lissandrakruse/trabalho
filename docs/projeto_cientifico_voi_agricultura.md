@@ -57,6 +57,11 @@ A política escolhe a candidata com maior violação positiva, atualiza a regiã
 factível e repete até consumir o orçamento. A poda é exata, enquanto a política
 é gulosa e não promete ótimo global para lotes.
 
+As frequências empíricas entram no programa linear sem arredondamento. Para uma
+frequência completa `p`, a evidência é representada por `max(0,p-0,001) <=
+P(E) <= min(1,p+0,001)`. A margem é intervalar; nenhuma redução para três casas
+é feita nos coeficientes do solver.
+
 ## Desenho experimental
 
 - base Crop Recommendation com 2.200 registros e 466 mundos observados;
@@ -69,17 +74,17 @@ factível e repete até consumir o orçamento. A poda é exata, enquanto a polí
 
 ## Resultados
 
-A largura média caiu de `0,066857` para `0,014312`, redução relativa média de
-`41,31%`. Os baselines terminaram com largura média `0,040575`
-(suporte/confiança) e `0,022285` (aleatório). A seleção venceu o primeiro em 6
-de 10 consultas e a média aleatória em 5 de 10. A taxa média de poda foi
-`66,29%`; considerando também os extremos violados de candidatas não escolhidas,
-a estratégia evitou `97,28%` das chamadas candidatas no total.
+A largura média caiu de `0,067066` para `0,015597`, redução relativa média de
+`36,45%`. Os baselines terminaram com largura média `0,043087`
+(suporte/confiança) e `0,026353` (aleatório). A seleção venceu o primeiro em 4
+de 10 consultas e a média aleatória em 4 de 10. A taxa média de poda foi
+`66,13%`; considerando também os extremos violados de candidatas não escolhidas,
+a estratégia evitou `97,23%` das chamadas candidatas no total.
 
-Na consulta de arroz, 25 de 52 candidatas relevantes reduziram a largura de
-`0,023265` para `0,019084`, recuperando `89,90%` da redução do modelo completo.
-Foram executadas 43 reotimizações; 1.446 das 2.000 avaliações de extremos foram
-podadas exatamente por factibilidade, e 1.957 chamadas candidatas foram
+Na consulta de maçã, 23 de 46 candidatas relevantes reduziram a largura de
+`0,217015` para `0,023056`, recuperando `100%` da redução do modelo completo.
+Foram executadas 35 reotimizações; 1.200 das 1.656 avaliações de extremos foram
+podadas exatamente por factibilidade, e 1.621 chamadas candidatas foram
 evitadas no total em relação a uma pontuação gulosa ingênua por reotimização.
 
 ## Contribuição delimitada

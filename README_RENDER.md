@@ -46,8 +46,10 @@ O arquivo `scripts/site_robot.py` testa o site como um cliente externo. Ele veri
 - intervalo do solver, 467 variaveis, 6.804 restricoes e SHA-256 do modelo;
 - correspondencia entre o modelo resolvido e o TXT auditavel;
 - plano de VoI para arroz, com chuva como primeira medicao, entropias e arvore;
-- selecao ativa de 25 restricoes, reducao do intervalo e poda dos extremos;
+- selecao ativa de 23 restricoes para a consulta de maca, reducao de 89,38% da
+  largura e poda dos extremos;
 - separacao explicita entre selecao ativa, solvers e o plano do artigo;
+- politica `p +/- 0,001` com o valor empirico completo, sem arredondamento no PL;
 - geracao e cabecalho dos relatorios PDF da consulta, dos solvers, de VoI e da selecao ativa.
 
 Execucao completa contra o Render:
@@ -65,6 +67,20 @@ novo commit da `main` e tambem pode ser iniciada manualmente na aba **Actions**.
 Nos testes automaticos, o robo aguarda o Render confirmar o SHA implantado antes
 de comecar. Ao final, ele disponibiliza o arquivo `robot-test-report.json` como
 artefato da execucao.
+
+O segundo robo confere a correspondencia cientifica com o artigo e reprova a
+execucao se encontrar arredondamento no programa linear:
+
+```bash
+python scripts/article_conformity_robot.py \
+  --output artifacts/article-conformity-report.json
+```
+
+Ele percorre todas as restricoes numericas, recalcula cada faixa a partir da
+frequencia empirica completa e testa tambem valores em que `round(p, 3)` mudaria
+o centro do intervalo. O relatorio classifica o projeto como reproducao direta
+ou adaptacao explicita em cada item, sem afirmar que a extensao agricola e uma
+copia literal do artigo.
 
 ## Desempenho da comparacao
 

@@ -160,7 +160,7 @@ def build_report() -> None:
                 ["Condicional", "P(A | B) = P(A e B) / P(B)", "Pergunta feita pelo usuario."],
                 ["Confianca", "confidence(B -> A) = P(A | B)", "Precisao da regra."],
                 ["Lift", "lift = P(A | B) / P(A)", "Forca da associacao."],
-                ["Intervalo", "round(p,3) +/- 0,001", "Probabilidade intervalar para evitar rigidez numerica."],
+                ["Intervalo", "p +/- 0,001, limitado a [0,1]", "Valor empirico completo, sem arredondamento computacional."],
                 ["Variavel LP", "x_w >= 0", "Probabilidade de cada mundo possivel."],
                 ["Normalizacao", "soma(x_w) = 1", "Distribuicao de probabilidade valida."],
                 ["Restricao", "L <= soma(x_w onde E) <= U", "Conhecimento probabilistico da base."],

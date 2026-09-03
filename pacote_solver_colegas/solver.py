@@ -156,9 +156,9 @@ def world_mask(worlds: list[dict[str, Any]], conditions: list[dict[str, str]]) -
     return [1.0 if matches(world["values"], conditions) else 0.0 for world in worlds]
 
 
-def rounded_interval(value: float, width: float = 0.001) -> tuple[float, float]:
-    rounded = round(value, 3)
-    return max(0.0, rounded - width), min(1.0, rounded + width)
+def probability_interval(value: float, width: float = 0.001) -> tuple[float, float]:
+    value = float(value)
+    return max(0.0, value - width), min(1.0, value + width)
 
 
 def clean_probability(value: float | None) -> float | None:
@@ -213,7 +213,7 @@ def solve_linear_interval(
     b_ub: list[float] = []
 
     def add_interval(mask: list[float], value: float) -> None:
-        lower, upper = rounded_interval(value)
+        lower, upper = probability_interval(value)
         a_ub.append(mask)
         b_ub.append(upper)
         a_ub.append([-item for item in mask])
@@ -281,9 +281,9 @@ def linear_program_text(
     p_ab: float,
     lp: dict[str, Any],
 ) -> str:
-    i_a = rounded_interval(p_a)
-    i_b = rounded_interval(p_b)
-    i_ab = rounded_interval(p_ab)
+    i_a = probability_interval(p_a)
+    i_b = probability_interval(p_b)
+    i_ab = probability_interval(p_ab)
     numerator = f"soma(x_w onde {event_key([*base, target])})"
     denominator = f"soma(x_w onde {event_key(base)})"
     lines = [
@@ -294,9 +294,11 @@ def linear_program_text(
         "  soma(x_w) = 1",
         "",
         "Restricoes extraidas da base:",
-        f"  {i_a[0]:.3f} <= P(A) = soma(x_w onde {event_key([target])}) <= {i_a[1]:.3f}",
-        f"  {i_b[0]:.3f} <= P(B) = {denominator} <= {i_b[1]:.3f}",
-        f"  {i_ab[0]:.3f} <= P(A e B) = {numerator} <= {i_ab[1]:.3f}",
+        "  Cada faixa usa o valor empirico completo p, sem round():",
+        "  max(0, p - 0.001) <= P(E) <= min(1, p + 0.001)",
+        f"  {i_a[0]!r} <= P(A) = soma(x_w onde {event_key([target])}) <= {i_a[1]!r}",
+        f"  {i_b[0]!r} <= P(B) = {denominator} <= {i_b[1]!r}",
+        f"  {i_ab[0]!r} <= P(A e B) = {numerator} <= {i_ab[1]!r}",
         "",
         "Consulta:",
         "  P(A | B) = P(A e B) / P(B)",

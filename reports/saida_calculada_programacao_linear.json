@@ -71,10 +71,10 @@
     }
   },
   "processamento": {
-    "inicio": "2026-07-29T02:03:48.055369+00:00",
-    "fim": "2026-07-29T02:03:53.904420+00:00",
-    "duracao_segundos": 5.849108799942769,
-    "duracao_milissegundos": 5849.109,
+    "inicio": "2026-09-03T13:47:15.605435+00:00",
+    "fim": "2026-09-03T13:47:17.731169+00:00",
+    "duracao_segundos": 2.1257290030043805,
+    "duracao_milissegundos": 2125.729,
     "observacao": "Tempo medido para carregar/preparar dados, calcular probabilidades e resolver o programa linear do exemplo do relatorio."
   },
   "probabilidades": {
@@ -138,10 +138,9 @@
       "calculo": "100 / 2200",
       "resultado": 0.045454545454545456,
       "intervalo_linear": {
-        "valor_original": 0.045454545454545456,
-        "valor_arredondado_3_casas": 0.045,
-        "limite_inferior": 0.044,
-        "limite_superior": 0.046
+        "valor_empirico_completo": 0.045454545454545456,
+        "limite_inferior": 0.044454545454545455,
+        "limite_superior": 0.04645454545454546
       }
     },
     "probabilidade_marginal_B": {
@@ -161,10 +160,9 @@
       "calculo": "218 / 2200",
       "resultado": 0.09909090909090909,
       "intervalo_linear": {
-        "valor_original": 0.09909090909090909,
-        "valor_arredondado_3_casas": 0.099,
-        "limite_inferior": 0.098,
-        "limite_superior": 0.1
+        "valor_empirico_completo": 0.09909090909090909,
+        "limite_inferior": 0.09809090909090909,
+        "limite_superior": 0.10009090909090909
       }
     },
     "probabilidade_conjunta_A_e_B": {
@@ -188,8 +186,7 @@
       "calculo": "33 / 2200",
       "resultado": 0.015,
       "intervalo_linear": {
-        "valor_original": 0.015,
-        "valor_arredondado_3_casas": 0.015,
+        "valor_empirico_completo": 0.015,
         "limite_inferior": 0.013999999999999999,
         "limite_superior": 0.016
       }
@@ -215,28 +212,25 @@
     },
     "variaveis_lineares": {
       "formula": "x_w >= 0 para cada mundo possivel w; soma(x_w) = 1",
-      "quantidade_variaveis": 466,
+      "quantidade_variaveis": 467,
       "mundos_observados": 466
     },
     "restricoes_lineares": {
       "formula": "L <= soma(x_w onde evento ocorre) <= U",
-      "quantidade_restricoes": 94,
+      "quantidade_restricoes": 6804,
       "restricoes_da_consulta": {
         "P(A)": {
-          "valor_original": 0.045454545454545456,
-          "valor_arredondado_3_casas": 0.045,
-          "limite_inferior": 0.044,
-          "limite_superior": 0.046
+          "valor_empirico_completo": 0.045454545454545456,
+          "limite_inferior": 0.044454545454545455,
+          "limite_superior": 0.04645454545454546
         },
         "P(B)": {
-          "valor_original": 0.09909090909090909,
-          "valor_arredondado_3_casas": 0.099,
-          "limite_inferior": 0.098,
-          "limite_superior": 0.1
+          "valor_empirico_completo": 0.09909090909090909,
+          "limite_inferior": 0.09809090909090909,
+          "limite_superior": 0.10009090909090909
         },
         "P(A_e_B)": {
-          "valor_original": 0.015,
-          "valor_arredondado_3_casas": 0.015,
+          "valor_empirico_completo": 0.015,
           "limite_inferior": 0.013999999999999999,
           "limite_superior": 0.016
         }
@@ -249,17 +243,35 @@
       "objetivo_minimo": "minimizar soma(y_w onde A e B)",
       "objetivo_maximo": "maximizar soma(y_w onde A e B)",
       "resultado_intervalar": {
-        "minimo": 0.13999999999999999,
-        "maximo": 0.16326530612244897
+        "minimo": 0.13987284287011797,
+        "maximo": 0.1631139944392957
       }
     }
   },
   "programacaoLinear": {
     "ok": true,
-    "lower": 0.13999999999999999,
-    "upper": 0.16326530612244897,
-    "variables": 466,
-    "constraints": 94,
-    "solver": "scipy.optimize.linprog highs"
+    "lower": 0.13987284287011797,
+    "upper": 0.1631139944392957,
+    "variables": 467,
+    "worldVariables": 466,
+    "observedWorldVariables": 466,
+    "queryCompletionWorlds": 0,
+    "empiricalJointZero": false,
+    "solverVariables": 467,
+    "constraints": 6804,
+    "baseConstraints": 6802,
+    "constraintSummary": {
+      "marginal": 43,
+      "pairwiseJoint": 651,
+      "aprioriRuleSupport": 1502,
+      "aprioriRuleConfidence": 1205,
+      "aprioriRuleConfidenceThreshold": 0.7,
+      "aprioriRuleConfidenceFilteredOut": 4107,
+      "aprioriRules": 5312
+    },
+    "solver": "scipy.optimize.linprog highs-ipm",
+    "solverMethod": "highs-ipm",
+    "solverName": "SciPy HiGHS Interior Point",
+    "modelDigest": "39359ee69c6cc7b1ec8c3d36c7a0b6fb85110caa2fc626de74660d75df55e39e"
   }
 }

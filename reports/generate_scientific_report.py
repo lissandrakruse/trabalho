@@ -16,7 +16,7 @@ import app
 
 OUTPUT = ROOT / "output" / "pdf" / "relatorio_selecao_ativa_agricultura.pdf"
 PAYLOAD = {
-    "target": {"attribute": "label", "value": "rice"},
+    "target": {"attribute": "label", "value": "apple"},
     "conditions": [
         {"attribute": "ph", "value": "acido"},
         {"attribute": "rainfall", "value": "alto"},

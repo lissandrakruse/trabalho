@@ -167,10 +167,11 @@ async function readJsonResponse(response) {
 
 function intervalText(value) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return "-";
-  const rounded = Number(value).toFixed(3);
-  const lower = Math.max(0, Number(rounded) - 0.001).toFixed(3);
-  const upper = Math.min(1, Number(rounded) + 0.001).toFixed(3);
-  return `${lower} <= ${rounded} <= ${upper}`;
+  const exact = Number(value);
+  const lower = Math.max(0, exact - 0.001);
+  const upper = Math.min(1, exact + 0.001);
+  const show = (number) => number.toFixed(9).replace(/0+$/, "").replace(/\.$/, "");
+  return `${show(lower)} <= ${show(exact)} <= ${show(upper)} (sem arredondar no PL)`;
 }
 
 function buildPayload() {

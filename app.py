@@ -42,6 +42,7 @@ APRIORI_MIN_SUPPORT = 0.01
 APRIORI_MIN_CONFIDENCE = 0.0
 APRIORI_MAX_ITEMSET_SIZE = 3
 APRIORI_RULE_PREVIEW_LIMIT = 50
+PROBABILITY_INTERVAL_RADIUS = 0.001
 # Todas as regras permanecem disponiveis para consulta e auditoria. No PL,
 # entretanto, so confiancas fortes entram como duas desigualdades adicionais.
 # Os suportes de todas as regras continuam sendo incorporados. Esse corte evita
@@ -277,12 +278,15 @@ def probability_count(rows: list[dict[str, str]], conditions: list[dict[str, str
     return sum(1 for row in rows if matches(row, conditions))
 
 
-def rounded_interval(value: float, width: float = 0.001) -> tuple[float, float]:
-    # Item 1a: trabalhar com intervalos evita que arredondamentos e ponto
-    # flutuante deixem o PL artificialmente inviavel. Ex.: 0.976 vira uma faixa
-    # pequena em torno do valor arredondado.
-    rounded = round(value, 3)
-    return max(0.0, rounded - width), min(1.0, rounded + width)
+def probability_interval(
+    value: float,
+    width: float = PROBABILITY_INTERVAL_RADIUS,
+) -> tuple[float, float]:
+    # O valor empirico completo e o centro da faixa. Nao ha round() no modelo:
+    # a margem intervalar representa tolerancia das evidencias, enquanto a
+    # formatacao em poucas casas decimais pertence apenas a interface/relatorio.
+    value = float(value)
+    return max(0.0, value - width), min(1.0, value + width)
 
 
 def clean_probability(value: float | None) -> float | None:
@@ -593,7 +597,7 @@ def build_linear_constraints(
             return False
         interval_events.add(signature)
         mask = cached_sparse_mask(conditions)
-        lower, upper = rounded_interval(value)
+        lower, upper = probability_interval(value)
         row_indexes = [len(a_ub), len(a_ub) + 1]
         a_ub.append(mask)
         b_ub.append(upper)
@@ -631,7 +635,7 @@ def build_linear_constraints(
         confidence = rule["confidence"]
         if confidence < APRIORI_LP_MIN_CONFIDENCE:
             return
-        lower, upper = rounded_interval(confidence)
+        lower, upper = probability_interval(confidence)
         antecedent_mask = cached_sparse_mask(antecedent)
         both_mask = cached_sparse_mask(both)
         confidence_row_indexes = [len(a_ub), len(a_ub) + 1]
@@ -956,10 +960,12 @@ def linear_program_text(
         "",
         "4. Evidencias globais usadas como restricoes intervalares:",
         "  O LP inclui marginais de cada valor e conjuntas por pares de valores.",
+        "  Cada faixa usa o valor empirico completo p: max(0, p - 0.001) <= P(E) <= min(1, p + 0.001).",
+        "  Nenhuma chamada round() altera p ou os coeficientes enviados ao solver.",
         "  P(A), P(B) e P(A e B) abaixo sao exibidos para auditoria da consulta:",
-        f"  P(A) empirico = {p_a:.3f}",
-        f"  P(B) empirico = {p_b:.3f}",
-        f"  P(A e B) empirico = {p_ab:.3f}",
+        f"  P(A) empirico completo = {p_a!r}",
+        f"  P(B) empirico completo = {p_b!r}",
+        f"  P(A e B) empirico completo = {p_ab!r}",
         "  A consulta nao injeta P(A e B) como resposta pronta no LP.",
         "",
         "5. Mineracao Apriori e regras lineares:",
@@ -1308,6 +1314,18 @@ def metadata():
                 "objective": "reduzir a largura U-L de P(A|B)",
                 "selection": "maior violacao dos extremos p_L e p_U",
                 "pruning": "reotimizar somente o extremo que viola a nova restricao",
+            },
+            "intervalPolicy": {
+                "computationalRounding": False,
+                "radius": PROBABILITY_INTERVAL_RADIUS,
+                "formula": (
+                    "max(0, p - 0.001) <= P(E) <= "
+                    "min(1, p + 0.001)"
+                ),
+                "purpose": (
+                    "representar tolerancia intervalar em torno da frequencia "
+                    "empirica completa, sem arredondar coeficientes"
+                ),
             },
         }
     )
@@ -2168,8 +2186,8 @@ def write_query_report(result: dict[str, Any]) -> None:
         Paragraph(result["linearProgram"].replace("\n", "<br/>"), code),
         Paragraph("Justificativa dos intervalos", styles["Heading2"]),
         Paragraph(
-            "As probabilidades foram representadas por intervalos para reduzir efeitos de "
-            "arredondamento e permitir modelagem consistente das restricoes lineares.",
+            "As probabilidades empiricas completas foram representadas por intervalos de "
+            "raio 0,001, sem arredondamento dos coeficientes do programa linear.",
             body,
         ),
         Paragraph("Relacao com a selecao ativa de informacao", styles["Heading2"]),
@@ -2399,6 +2417,13 @@ def write_solver_comparison_report(result: dict[str, Any]) -> None:
             "P(A e B) empirico aparece na tabela apenas para auditoria. A resposta especifica "
             "da consulta nao e imposta como restricao do modelo; os limites sao inferidos a "
             "partir das restricoes globais de marginais, pares e regras Apriori.",
+            body,
+        ),
+        Paragraph(
+            "Politica numerica: cada restricao usa diretamente a frequencia empirica completa p "
+            "no intervalo max(0, p - 0,001) ate min(1, p + 0,001). Nao existe arredondamento "
+            "de p nem dos coeficientes enviados aos tres metodos do HiGHS; a formatacao com "
+            "menos casas aparece somente na apresentacao das tabelas.",
             body,
         ),
         Paragraph(
@@ -2686,6 +2711,12 @@ def write_active_selection_report(
         Paragraph(
             "score(C) = max(0, max(A_C z_L), max(A_C z_U)); escolher C* = argmax score(C)",
             equation,
+        ),
+        Paragraph(
+            "Politica numerica obrigatoria: toda probabilidade empirica entra com seu valor "
+            "completo p. As faixas sao max(0, p - 0,001) e min(1, p + 0,001), sem round() "
+            "no modelo ou nos solvers. Casas decimais reduzidas aparecem apenas na exibicao.",
+            body,
         ),
         Paragraph("4. Poda exata", styles["Heading2"]),
         Paragraph(result["pruningProof"], body),

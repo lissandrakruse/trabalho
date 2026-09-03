@@ -20,6 +20,7 @@ DEFAULT_OUTPUT = ROOT / "reports" / "generated" / "solver_resultado_padrao.json"
 DEFAULT_VOI_OUTPUT = ROOT / "reports" / "generated" / "plano_voi_padrao.json"
 DEFAULT_ACTIVE_OUTPUT = ROOT / "reports" / "generated" / "selecao_ativa_padrao.json"
 DEFAULT_TARGET = {"attribute": "label", "value": "rice"}
+DEFAULT_ACTIVE_TARGET = {"attribute": "label", "value": "apple"}
 DEFAULT_CONDITIONS = [
     {"attribute": "ph", "value": "acido"},
     {"attribute": "rainfall", "value": "alto"},
@@ -44,12 +45,13 @@ def run_default_query() -> int:
     lift = result["lift"]
     print(f"Confianca da regra: {confidence:.3f}" if confidence is not None else "Confianca da regra: -")
     print(f"Lift: {lift:.3f}" if lift is not None else "Lift: -")
-    print(f"Probabilidade empirica P(A e B), somente para auditoria: {result['pAB']:.3f}")
+    print(f"Probabilidade empirica completa P(A e B), somente para auditoria: {result['pAB']!r}")
     print("A resposta empirica da consulta nao e fixada como restricao do PL.")
+    print("O PL usa p completo +/- 0.001; nenhuma probabilidade e arredondada.")
 
     linear = result["linear"]
     if linear.get("ok"):
-        print(f"Intervalo linear: {linear['lower']:.3f} <= P(A | B) <= {linear['upper']:.3f}")
+        print(f"Intervalo linear completo: {linear['lower']!r} <= P(A | B) <= {linear['upper']!r}")
         print(f"Variaveis: {linear['variables']}")
         print(f"Restricoes: {linear['constraints']}")
     else:
@@ -77,7 +79,7 @@ def run_default_query() -> int:
 
     active = project_app.compute_active_selection(
         {
-            "target": DEFAULT_TARGET,
+            "target": DEFAULT_ACTIVE_TARGET,
             "conditions": DEFAULT_CONDITIONS,
             "budget": 25,
             "minimumLiteralOverlap": 2,

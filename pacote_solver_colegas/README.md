@@ -67,8 +67,10 @@ python solver.py --target label=rice --condition ph=acido --output results/minha
 
 ## Observacao sobre intervalos
 
-As probabilidades foram representadas por intervalos para reduzir efeitos de
-arredondamento e permitir modelagem consistente das restricoes lineares.
+As probabilidades entram com o valor empirico completo `p`, sem arredondamento
+computacional. A faixa usada e `max(0, p - 0,001) <= P(E) <= min(1, p +
+0,001)`. A margem representa tolerancia intervalar; abreviar casas decimais na
+tela nao altera os coeficientes enviados ao solver.
 
 ## Referencias
 

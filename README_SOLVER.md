@@ -102,8 +102,16 @@ Além das regras Apriori, o modelo inclui:
 - `P(X=x, Y=y)` para todos os pares de atributos e valores;
 - normalização e não negatividade das massas dos mundos.
 
-As restrições usam intervalos estreitos ao redor das frequências empíricas para
-absorver arredondamento numérico.
+As restrições usam o valor empírico completo `p` como centro de um intervalo
+estreito, sem arredondamento computacional:
+
+```text
+max(0, p - 0,001) <= P(E) <= min(1, p + 0,001)
+```
+
+A margem `0,001` expressa a tolerância intervalar da evidência. Ela não é um
+arredondamento, e os coeficientes enviados ao solver preservam todas as casas
+decimais disponíveis. A exibição pode ser abreviada apenas para leitura.
 
 ### 6. A consulta não injeta a própria resposta
 
@@ -183,11 +191,11 @@ não é resolvido novamente. O mesmo vale para `p_U`. Assim, a checagem de todas
 as candidatas usa apenas multiplicação matriz-vetor e o HiGHS é chamado no
 máximo duas vezes por restrição efetivamente escolhida.
 
-Na consulta de referência, 25 de 52 candidatas relevantes reduzem a largura de
-`0,023265` para `0,019084`, superam os baselines sob o mesmo orçamento e evitam
-97,85% das chamadas candidatas no total. O experimento em dez consultas mostra
-redução relativa média de 41,31%, taxa média de poda exata de 66,29% e economia
-total média de 97,28% das chamadas candidatas.
+Na consulta ativa de referência para maçã, 23 de 46 candidatas relevantes
+reduzem a largura de `0,217015` para `0,023056`, superam os baselines sob o
+mesmo orçamento e evitam 97,89% das chamadas candidatas no total. O experimento
+em dez consultas mostra redução relativa média de 36,45%, taxa média de poda
+exata de 66,13% e economia total média de 97,23% das chamadas candidatas.
 
 ## Interface do usuário
 

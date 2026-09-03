@@ -258,9 +258,9 @@ def complete_unobserved_query_worlds(
     return [*worlds, *additions], len(additions)
 
 
-def rounded_interval(value: float, width: float = 0.001) -> tuple[float, float]:
-    rounded = round(value, 3)
-    return max(0.0, rounded - width), min(1.0, rounded + width)
+def probability_interval(value: float, width: float = 0.001) -> tuple[float, float]:
+    value = float(value)
+    return max(0.0, value - width), min(1.0, value + width)
 
 
 def clean_probability(value: float | None) -> float | None:
@@ -369,7 +369,7 @@ def build_linear_constraints(
         if signature in interval_events:
             return False
         interval_events.add(signature)
-        lower, upper = rounded_interval(value)
+        lower, upper = probability_interval(value)
         mask = cached_sparse_mask(conditions)
         a_ub.append(mask)
         b_ub.append(upper)
@@ -388,7 +388,7 @@ def build_linear_constraints(
         if rule["confidence"] < APRIORI_LP_MIN_CONFIDENCE:
             summary["aprioriRuleConfidenceFilteredOut"] += 1
             return
-        lower, upper = rounded_interval(rule["confidence"])
+        lower, upper = probability_interval(rule["confidence"])
         antecedent_mask = cached_sparse_mask(antecedent)
         both_mask = cached_sparse_mask(both)
         a_ub.append(add_sparse_vectors(both_mask, antecedent_mask, -upper))
@@ -565,9 +565,11 @@ def linear_program_text(
         "",
         "4. Evidencias globais usadas como restricoes intervalares:",
         "  O LP inclui marginais de cada valor e conjuntas por pares de valores.",
-        f"  P(A) empirico para auditoria = {p_a:.3f}",
-        f"  P(B) empirico para auditoria = {p_b:.3f}",
-        f"  P(A e B) empirico para auditoria = {p_ab:.3f}",
+        "  Cada faixa usa o valor empirico completo p: max(0, p - 0.001) <= P(E) <= min(1, p + 0.001).",
+        "  Nenhuma chamada round() altera p ou os coeficientes enviados ao solver.",
+        f"  P(A) empirico completo para auditoria = {p_a!r}",
+        f"  P(B) empirico completo para auditoria = {p_b!r}",
+        f"  P(A e B) empirico completo para auditoria = {p_ab!r}",
         "  A consulta nao injeta P(A e B) como resposta pronta no LP.",
         "",
         "5. Mineracao Apriori e regras lineares:",

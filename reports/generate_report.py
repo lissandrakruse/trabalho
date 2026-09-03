@@ -135,12 +135,10 @@ def interval_chart(empirical: float | None, lower: float | None, upper: float | 
 
 
 def interval_dict(value: float) -> dict[str, float]:
-    rounded = round(value, 3)
     return {
-        "valor_original": value,
-        "valor_arredondado_3_casas": rounded,
-        "limite_inferior": max(0.0, rounded - 0.001),
-        "limite_superior": min(1.0, rounded + 0.001),
+        "valor_empirico_completo": value,
+        "limite_inferior": max(0.0, value - 0.001),
+        "limite_superior": min(1.0, value + 0.001),
     }
 
 
@@ -474,8 +472,8 @@ def build_report() -> None:
             ],
             [
                 "Intervalo",
-                "round(p, 3) - 0,001 <= P(E) <= round(p, 3) + 0,001",
-                "Evitar rigidez numerica e representar probabilidade intervalar.",
+                "p - 0,001 <= P(E) <= p + 0,001, limitado a [0,1]",
+                "Representar tolerancia intervalar sem arredondar p no modelo.",
             ],
             [
                 "Variavel linear",
@@ -558,8 +556,8 @@ def build_report() -> None:
         Paragraph(
             "O grafico abaixo compara o valor empirico da confianca com o intervalo "
             "calculado pelo solver. O intervalo aparece porque as probabilidades do "
-            "dataset sao usadas como restricoes aproximadas, com arredondamento em "
-            "tres casas decimais.",
+            "dataset sao usadas com seu valor completo como centro de restricoes "
+            "intervalares de raio 0,001. Nao ha arredondamento nos coeficientes.",
             body,
         )
     )

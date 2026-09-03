@@ -54,6 +54,20 @@ O modelo-base `F_0` contém marginais e conjuntas por pares. As candidatas são
 restrições de suporte e confiança extraídas pelo Apriori e filtradas pela
 sobreposição de literais com a consulta atual.
 
+### Probabilidades sem arredondamento
+
+O programa linear usa cada frequência empírica completa `p`; nenhuma chamada a
+`round(p, 3)` participa da construção das restrições. A faixa intervalar é:
+
+```text
+max(0, p - 0,001) <= P(E) <= min(1, p + 0,001)
+```
+
+O raio `0,001` representa tolerância da evidência intervalar, não
+arredondamento. Casas decimais reduzidas aparecem somente na interface e nos
+relatórios para facilitar a leitura. O robô de conformidade reconstrói todas as
+linhas numéricas e reprova o projeto se o centro tiver sido arredondado.
+
 ### Poda exata dos extremos
 
 Se `z_L` minimiza a consulta em `F` e satisfaz a candidata `C`, então `z_L`
@@ -93,7 +107,7 @@ Ela evita a busca combinatória de `combinação(|C|, K)` subconjuntos.
 Consulta:
 
 ```text
-P(label=rice | ph=acido, rainfall=alto)
+P(label=apple | ph=acido, rainfall=alto)
 ```
 
 Com orçamento 25 e filtro de pelo menos dois literais em comum:
@@ -101,23 +115,24 @@ Com orçamento 25 e filtro de pelo menos dois literais em comum:
 | Indicador | Resultado |
 | --- | ---: |
 | restrições Apriori disponíveis | 2.707 |
-| candidatas relevantes | 52 |
-| restrições selecionadas | 25 |
-| largura do modelo-base | 0,023265 |
-| largura após seleção ativa | 0,019084 |
-| redução relativa | 17,97% |
-| largura por suporte/confiança | 0,023265 |
-| largura aleatória média | 0,022122 |
-| redução do modelo completo recuperada | 89,90% |
-| verificações algébricas de extremos | 2.000 |
-| reotimizações seletivas executadas | 43 |
-| podas exatas por factibilidade | 1.446 (72,30%) |
-| chamadas candidatas evitadas no total | 1.957 (97,85%) |
-| subconjuntos que uma busca completa examinaria | 477.551.179.875.952 |
+| candidatas relevantes | 46 |
+| restrições selecionadas | 23 |
+| largura do modelo-base | 0,217015 |
+| largura após seleção ativa | 0,023056 |
+| redução relativa | 89,38% |
+| largura por suporte/confiança | 0,094475 |
+| largura aleatória média | 0,070445 |
+| redução do modelo completo recuperada | 100,00% |
+| verificações algébricas de extremos | 1.656 |
+| reotimizações seletivas executadas | 35 |
+| podas exatas por factibilidade | 1.200 (72,46%) |
+| chamadas candidatas evitadas no total | 1.621 (97,89%) |
+| subconjuntos que uma busca completa examinaria | 8.233.430.727.600 |
 
-Algumas inclusões iniciais não alteram imediatamente a largura porque pode
-existir outra solução ótima na mesma face. Restrições sucessivas eliminam essa
-face; no caso de arroz, a redução aparece no passo 24.
+Algumas inclusões não alteram imediatamente a largura porque pode existir outra
+solução ótima na mesma face. Na consulta de maçã, o algoritmo recupera toda a
+redução do modelo completo e para no passo 23, quando as candidatas restantes
+já são satisfeitas pelos dois extremos.
 
 ## Avaliação em dez consultas
 
@@ -127,15 +142,15 @@ três consultas sem ocorrência conjunta na amostra.
 
 | Medida agregada | Resultado |
 | --- | ---: |
-| largura média do modelo-base | 0,066857 |
-| largura média da seleção ativa | 0,014312 |
-| redução relativa média | 41,31% |
-| largura média por suporte/confiança | 0,040575 |
-| largura aleatória média | 0,022285 |
-| taxa média de poda exata | 66,29% |
-| taxa média total de chamadas evitadas | 97,28% |
-| vitórias sobre suporte/confiança | 6 de 10 |
-| vitórias sobre a média aleatória | 5 de 10 |
+| largura média do modelo-base | 0,067066 |
+| largura média da seleção ativa | 0,015597 |
+| redução relativa média | 36,45% |
+| largura média por suporte/confiança | 0,043087 |
+| largura aleatória média | 0,026353 |
+| taxa média de poda exata | 66,13% |
+| taxa média total de chamadas evitadas | 97,23% |
+| vitórias sobre suporte/confiança | 4 de 10 |
+| vitórias sobre a média aleatória | 4 de 10 |
 
 A seleção ativa foi melhor **em média**, não em todas as consultas. Essa
 distinção é importante: o experimento sustenta a hipótese agregada nesta
@@ -179,6 +194,16 @@ Reprodução do plano de observações do artigo:
 ```bash
 python scripts/plan_voi.py --crop rice --budget 2
 ```
+
+Robô de conformidade com o artigo e com a política sem arredondamento:
+
+```bash
+python scripts/article_conformity_robot.py
+```
+
+O resultado esperado é `conforme_com_adaptacao_explicita`: a reprodução de VoI
+segue o artigo; a seleção de restrições é uma adaptação declarada, e não uma
+alegação de que o sistema agrícola seja uma cópia literal do ProbLog original.
 
 Relatório científico versionado:
 

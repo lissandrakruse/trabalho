@@ -24,7 +24,7 @@ from urllib.request import Request, urlopen
 
 
 DEFAULT_BASE_URL = "https://trabalho-bh30.onrender.com/"
-REFERENCE_DIGEST = "b5a3fab28e4a5b7d0673779ed6391ac540bc6d4e1ffc676344b75366c39295a0"
+REFERENCE_DIGEST = "39359ee69c6cc7b1ec8c3d36c7a0b6fb85110caa2fc626de74660d75df55e39e"
 REFERENCE_QUERY = {
     "target": {"attribute": "label", "value": "rice"},
     "conditions": [
@@ -49,7 +49,11 @@ REFERENCE_VOI = {
     ],
 }
 REFERENCE_ACTIVE_SELECTION = {
-    **REFERENCE_QUERY,
+    "target": {"attribute": "label", "value": "apple"},
+    "conditions": [
+        {"attribute": "ph", "value": "acido"},
+        {"attribute": "rainfall", "value": "alto"},
+    ],
     "budget": 25,
     "minimumLiteralOverlap": 2,
     "maxCandidates": 80,
@@ -224,6 +228,13 @@ def robot_run(
         require((voi.get("article") or {}).get("doi") == "10.4204/EPTCS.306.14", "Artigo-base de VoI incorreto")
         active = metadata.get("activeSelection") or {}
         require(active.get("defaultBudget") == 25, "Orcamento padrao da selecao ativa incorreto")
+        interval_policy = metadata.get("intervalPolicy") or {}
+        require(
+            interval_policy.get("computationalRounding") is False,
+            "O modelo voltou a arredondar probabilidades.",
+        )
+        require(close_to(interval_policy.get("radius"), 0.001), "Raio intervalar diferente de 0,001")
+        require("round" not in str(interval_policy.get("formula", "")).lower(), "Formula ainda usa round()")
         state["metadata"] = metadata
         return {
             "records": metadata["total"],
@@ -232,6 +243,8 @@ def robot_run(
             "voi_observables": len(voi["observables"]),
             "voi_article_doi": voi["article"]["doi"],
             "active_selection_budget": active["defaultBudget"],
+            "computational_rounding": interval_policy["computationalRounding"],
+            "interval_radius": interval_policy["radius"],
         }
 
     checks.append(run_check("dataset_e_apriori", check_metadata))
@@ -245,8 +258,8 @@ def robot_run(
         require(result.get("countBase") == 218, "Contagem de B diferente de 218")
         require(close_to(result.get("support"), 0.015), "Suporte diferente de 0,015")
         require(close_to(result.get("confidence"), 33 / 218), "Confianca diferente de 33/218")
-        require(close_to(linear.get("lower"), 0.14428476583332425, 1e-8), "Limite inferior inesperado")
-        require(close_to(linear.get("upper"), 0.16289922777776156, 1e-8), "Limite superior inesperado")
+        require(close_to(linear.get("lower"), 0.13987284287011797, 1e-8), "Limite inferior inesperado")
+        require(close_to(linear.get("upper"), 0.1631139944392957, 1e-8), "Limite superior inesperado")
         require(linear.get("worldVariables") == 466, "Quantidade de variaveis de mundos incorreta")
         require(linear.get("solverVariables") == 467, "Quantidade de variaveis do solver incorreta")
         require(linear.get("constraints") == 6804, "Quantidade de restricoes incorreta")
@@ -308,20 +321,20 @@ def robot_run(
         )
         require(result.get("ok") is True, f"Selecao ativa recusada: {result.get('error')}")
         require(result.get("method") == "greedy_query_directed_endpoint_pruning", "Metodo ativo incorreto")
-        require(result.get("selectedCount") == 25, "A selecao deveria usar 25 restricoes")
+        require(result.get("selectedCount") == 23, "A selecao deveria usar 23 restricoes")
         pool = result.get("candidatePool") or {}
-        require(pool.get("evaluated") == 52, "A consulta de arroz deveria avaliar 52 candidatas")
+        require(pool.get("evaluated") == 46, "A consulta de apple deveria avaliar 46 candidatas")
         base_model = result.get("baseModel") or {}
         active = result.get("activeSelection") or {}
-        require(close_to(base_model.get("width"), 0.023265306122449037), "Largura-base inesperada")
-        require(close_to(active.get("width"), 0.019084049685785698), "Largura ativa inesperada")
-        require(close_to(active.get("relativeWidthReduction"), 0.17972067140044132), "Reducao ativa inesperada")
-        require(len(active.get("selectionTrace") or []) == 25, "Rastro ativo incompleto")
+        require(close_to(base_model.get("width"), 0.21701477888077153), "Largura-base inesperada")
+        require(close_to(active.get("width"), 0.023055963110458988), "Largura ativa inesperada")
+        require(close_to(active.get("relativeWidthReduction"), 0.8937585576919349), "Reducao ativa inesperada")
+        require(len(active.get("selectionTrace") or []) == 23, "Rastro ativo incompleto")
         baselines = result.get("baselines") or {}
         require(active["width"] < baselines["supportConfidence"]["width"], "Ativo nao superou suporte/confianca")
         require(active["width"] < baselines["random"]["meanWidth"], "Ativo nao superou a media aleatoria")
         effort = result.get("solverEffort") or {}
-        require(effort.get("selectedEndpointLpSolves") == 43, "Quantidade de reotimizacoes inesperada")
+        require(effort.get("selectedEndpointLpSolves") == 35, "Quantidade de reotimizacoes inesperada")
         require(float(effort.get("exactPruningRate", 0)) > 0.70, "Poda exata abaixo da referencia")
         require(float(effort.get("totalAvoidanceRate", 0)) > 0.97, "Economia total abaixo da referencia")
         state["active_selection"] = result
@@ -404,8 +417,8 @@ def robot_run(
             require(engine.get("allMatch") is True, f"Metodo {engine.get('method')} divergiu")
             require(engine.get("variables") == 467, f"Metodo {engine.get('method')} nao usou 467 variaveis")
             require(engine.get("constraints") == 6804, f"Metodo {engine.get('method')} nao usou 6.804 restricoes")
-            require(close_to(engine.get("lower"), 0.14428476583332425, 1e-8), f"Limite inferior divergente em {engine.get('method')}")
-            require(close_to(engine.get("upper"), 0.16289922777776156, 1e-8), f"Limite superior divergente em {engine.get('method')}")
+            require(close_to(engine.get("lower"), 0.13987284287011797, 1e-8), f"Limite inferior divergente em {engine.get('method')}")
+            require(close_to(engine.get("upper"), 0.1631139944392957, 1e-8), f"Limite superior divergente em {engine.get('method')}")
         state["solver_comparison"] = result
         return {
             "all_match": True,
@@ -489,8 +502,8 @@ def robot_run(
                 payload=REFERENCE_ACTIVE_SELECTION,
             )
             require(generated.get("ok") is True, f"Relatorio ativo falhou: {generated.get('error')}")
-            require(generated.get("selectedCount") == 25, "PDF ativo usou selecao diferente")
-            require(close_to(generated.get("relativeWidthReduction"), 0.17972067140044132), "PDF ativo usou reducao diferente")
+            require(generated.get("selectedCount") == 23, "PDF ativo usou selecao diferente")
+            require(close_to(generated.get("relativeWidthReduction"), 0.8937585576919349), "PDF ativo usou reducao diferente")
             require(float(generated.get("exactPruningRate", 0)) > 0.70, "PDF ativo perdeu a poda de referencia")
             require(float(generated.get("totalAvoidanceRate", 0)) > 0.97, "PDF ativo perdeu a economia total")
             pdf, headers = client.request(generated["reportUrl"])

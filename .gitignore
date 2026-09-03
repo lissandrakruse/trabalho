@@ -4,3 +4,5 @@ README.md
 __pycache__/
 **/__pycache__/
 reports/generated/
+artifacts/
+tmp/
