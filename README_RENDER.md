@@ -45,7 +45,10 @@ O arquivo `scripts/site_robot.py` testa o site como um cliente externo. Ele veri
 - comparacao real entre `highs`, `highs-ds` e `highs-ipm`;
 - intervalo do solver, 467 variaveis, 6.804 restricoes e SHA-256 do modelo;
 - correspondencia entre o modelo resolvido e o TXT auditavel;
-- geracao e cabecalho dos relatorios PDF da consulta e dos solvers.
+- plano de VoI para arroz, com chuva como primeira medicao, entropias e arvore;
+- selecao ativa de 25 restricoes, reducao do intervalo e poda dos extremos;
+- separacao explicita entre selecao ativa, solvers e o plano do artigo;
+- geracao e cabecalho dos relatorios PDF da consulta, dos solvers, de VoI e da selecao ativa.
 
 Execucao completa contra o Render:
 
@@ -79,3 +82,8 @@ Na interface, a comparacao e dividida em tres requisicoes: primeiro o
 HiGHS-IPM do projeto principal, depois `highs` e `highs-ds` pelo script separado.
 Cada metodo termina dentro do limite individual do servico; a rota comparativa e
 o PDF apenas reunem os resultados reais ja calculados.
+
+A primeira selecao ativa da consulta de referencia leva alguns segundos porque
+resolve os extremos iniciais e atualiza somente os que forem violados. O
+resultado completo fica em cache por consulta e configuracao; o PDF da selecao
+ativa reutiliza esse resultado sem repetir os PLs.

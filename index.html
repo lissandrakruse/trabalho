@@ -12,7 +12,7 @@
         <header class="topbar">
           <div>
             <h1>Probabilidades do Solo</h1>
-            <p>Mundos possíveis Ω, regras de associação geradas pelo Apriori e programação linear probabilística.</p>
+            <p>Mundos possíveis Ω, Apriori, programação linear probabilística e seleção ativa de informação aplicada à agricultura.</p>
           </div>
           <div class="dataset-status" id="datasetStatus">Carregando dataset...</div>
         </header>
@@ -80,6 +80,95 @@
           <div class="explanation" id="probabilityText"></div>
         </section>
 
+        <section class="panel active-selection-panel">
+          <div class="panel-head">
+            <div>
+              <h2>Contribuição principal — Seleção Ativa de Restrições</h2>
+              <p class="panel-subtitle">Adaptação do Valor da Informação ao programa lógico-probabilístico intervalar: selecionar quais restrições Apriori mais ajudam a consulta atual.</p>
+            </div>
+          </div>
+          <div class="active-introduction">
+            <p><strong>Pergunta de pesquisa:</strong> uma seleção orientada pela consulta reduz mais a largura do intervalo <strong>U − L</strong>, com a mesma quantidade de informações, do que a seleção aleatória ou por suporte/confiança?</p>
+            <p>A poda é exata: se o extremo <strong>p<sub>L</sub></strong> ou <strong>p<sub>U</sub></strong> já satisfaz a nova restrição, aquele limite não muda e não precisa ser resolvido novamente.</p>
+          </div>
+          <div class="active-config-grid">
+            <label>
+              Orçamento de restrições
+              <input id="activeBudget" type="number" min="0" max="60" step="1" value="25" />
+            </label>
+            <label>
+              Literais da consulta em comum
+              <input id="activeOverlap" type="number" min="1" max="3" step="1" value="2" />
+            </label>
+            <label>
+              Máximo de candidatas avaliadas
+              <input id="activeMaxCandidates" type="number" min="1" max="120" step="1" value="80" />
+            </label>
+          </div>
+          <button class="primary-action" id="runActiveSelection" type="button">Selecionar restrições para esta consulta</button>
+          <div class="active-report-actions">
+            <button class="secondary-action" id="generateActiveReport" type="button">Gerar relatório da seleção ativa</button>
+            <a class="download-link is-hidden" id="downloadActiveReport" href="/reports/generated/relatorio_selecao_ativa.pdf" target="_blank" rel="noopener">Baixar relatório da seleção ativa</a>
+          </div>
+          <div class="active-status" id="activeStatus">Execute a consulta acima e depois inicie a seleção ativa.</div>
+          <div class="voi-metrics" id="activeMetrics"></div>
+          <div class="active-output-grid">
+            <section>
+              <h3>Comparação sob o mesmo orçamento</h3>
+              <div class="voi-table-wrap" id="activeComparison"></div>
+            </section>
+            <section>
+              <h3>Restrições escolhidas em sequência</h3>
+              <div class="voi-table-wrap" id="activeTrace"></div>
+            </section>
+          </div>
+          <div class="active-proof" id="activeProof"></div>
+        </section>
+
+        <section class="panel voi-panel">
+          <div class="panel-head">
+            <div>
+              <h2>Reprodução do Artigo — Valor da Informação</h2>
+              <p class="panel-subtitle">Plano condicional guloso da Figura 3 de Ghosh e Ramakrishnan (2019), mantido como experimento-base para escolha de medições de solo e clima.</p>
+            </div>
+            <a class="article-link" href="https://arxiv.org/abs/1909.08234" target="_blank" rel="noopener">Abrir artigo-base</a>
+          </div>
+          <div class="voi-introduction">
+            <p>A consulta ground é <strong>recomendar(cultura)</strong>. Cada atributo mensurável é um observável com custo. Em cada cenário, o algoritmo escolhe a medição que mais reduz, em esperança, a entropia sobre a verdade da consulta e que cabe no orçamento restante.</p>
+          </div>
+          <div class="voi-config-grid">
+            <label>
+              Cultura consultada
+              <select id="voiTargetValue"></select>
+            </label>
+            <label>
+              Orçamento (unidades relativas)
+              <input id="voiBudget" type="number" min="0" max="10" step="0.5" value="2" />
+            </label>
+          </div>
+          <div class="voi-observables">
+            <h3>Observáveis e custos</h3>
+            <div id="voiObservableList"></div>
+          </div>
+          <button class="primary-action" id="runVoi" type="button">Construir plano condicional</button>
+          <div class="voi-report-actions">
+            <button class="secondary-action" id="generateVoiReport" type="button">Gerar relatório explicativo de VoI</button>
+            <a class="download-link is-hidden" id="downloadVoiReport" href="/reports/generated/relatorio_voi_agricultura.pdf" target="_blank" rel="noopener">Baixar relatório de VoI</a>
+          </div>
+          <div class="voi-status" id="voiStatus">Aguardando execução</div>
+          <div class="voi-metrics" id="voiMetrics"></div>
+          <div class="voi-output-grid">
+            <section>
+              <h3>Ranking no cenário inicial</h3>
+              <div class="voi-table-wrap" id="voiRanking"></div>
+            </section>
+            <section>
+              <h3>Árvore de decisão</h3>
+              <div class="voi-tree" id="voiTree"></div>
+            </section>
+          </div>
+        </section>
+
         <section class="panel">
           <div class="panel-head">
             <h2>Compara&ccedil;&atilde;o com Solver Separado</h2>
@@ -123,6 +212,6 @@
       </section>
     </main>
 
-    <script src="script.js?v=20260827-apriori-lp"></script>
+    <script src="script.js?v=20260903-selecao-ativa"></script>
   </body>
 </html>

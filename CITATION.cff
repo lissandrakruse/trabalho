@@ -1,0 +1,23 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite the project and the VoI article listed below."
+title: "Probabilidades do Solo: Selecao Ativa em Logica Probabilistica Intervalar"
+type: software
+authors:
+  - family-names: "Fuganti"
+    given-names: "Lissandra Kruse"
+repository-code: "https://github.com/lissandrakruse/trabalho"
+url: "https://trabalho-bh30.onrender.com"
+preferred-citation:
+  type: conference-paper
+  title: "Value of Information in Probabilistic Logic Programs"
+  authors:
+    - family-names: "Ghosh"
+      given-names: "Sarthak"
+    - family-names: "Ramakrishnan"
+      given-names: "C. R."
+  year: 2019
+  collection-title: "Electronic Proceedings in Theoretical Computer Science"
+  volume: 306
+  start: 71
+  end: 84
+  doi: "10.4204/EPTCS.306.14"

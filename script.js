@@ -24,6 +24,27 @@ const linearProgram = document.querySelector("#linearProgram");
 const mathModel = document.querySelector("#mathModel");
 const tabButtons = document.querySelectorAll(".tab-button");
 const tabPanels = document.querySelectorAll(".tab-panel");
+const voiTargetValue = document.querySelector("#voiTargetValue");
+const voiBudget = document.querySelector("#voiBudget");
+const voiObservableList = document.querySelector("#voiObservableList");
+const runVoiButton = document.querySelector("#runVoi");
+const generateVoiReportButton = document.querySelector("#generateVoiReport");
+const downloadVoiReportLink = document.querySelector("#downloadVoiReport");
+const voiStatus = document.querySelector("#voiStatus");
+const voiMetrics = document.querySelector("#voiMetrics");
+const voiRanking = document.querySelector("#voiRanking");
+const voiTree = document.querySelector("#voiTree");
+const activeBudget = document.querySelector("#activeBudget");
+const activeOverlap = document.querySelector("#activeOverlap");
+const activeMaxCandidates = document.querySelector("#activeMaxCandidates");
+const runActiveSelectionButton = document.querySelector("#runActiveSelection");
+const generateActiveReportButton = document.querySelector("#generateActiveReport");
+const downloadActiveReportLink = document.querySelector("#downloadActiveReport");
+const activeStatus = document.querySelector("#activeStatus");
+const activeMetrics = document.querySelector("#activeMetrics");
+const activeComparison = document.querySelector("#activeComparison");
+const activeTrace = document.querySelector("#activeTrace");
+const activeProof = document.querySelector("#activeProof");
 
 // FRONTEND DO EXERCICIO
 //
@@ -33,6 +54,11 @@ const tabPanels = document.querySelectorAll(".tab-panel");
 let domains = {};
 let labels = {};
 let attributes = [];
+let voiMetadata = {};
+let activeMetadata = {};
+let lastQueryResult = null;
+let lastVoiResult = null;
+let lastActiveSelectionResult = null;
 
 function firstAttributeExcept(attribute) {
   return attributes.find((item) => item !== attribute) || attributes[0];
@@ -186,6 +212,264 @@ function setActiveTab(activeButton) {
   });
 }
 
+function renderVoiObservables(observables) {
+  voiObservableList.innerHTML = observables.map((item) => [
+    `<label class="voi-observable-row">`,
+    `<input type="checkbox" data-voi-enabled value="${escapeHtml(item.attribute)}" checked />`,
+    `<span>${escapeHtml(item.label || item.attribute)}<small>${escapeHtml((item.outcomes || []).join(" / "))}</small></span>`,
+    `<input type="number" data-voi-cost min="0.1" max="10" step="0.1" value="${Number(item.cost || 1)}" aria-label="Custo de ${escapeHtml(item.label || item.attribute)}" />`,
+    `</label>`,
+  ].join("")).join("");
+}
+
+function buildVoiPayload() {
+  const observables = [...voiObservableList.querySelectorAll(".voi-observable-row")]
+    .filter((row) => row.querySelector("[data-voi-enabled]").checked)
+    .map((row) => ({
+      attribute: row.querySelector("[data-voi-enabled]").value,
+      cost: Number(row.querySelector("[data-voi-cost]").value),
+    }));
+  return {
+    target: { attribute: "label", value: voiTargetValue.value },
+    observables,
+    budget: Number(voiBudget.value),
+    maxNodes: Number(voiMetadata.defaultMaxNodes || 400),
+  };
+}
+
+function voiStopLabel(reason) {
+  return ({
+    no_observables: "todos os observáveis foram usados",
+    insufficient_budget: "orçamento insuficiente",
+    no_utility_gain: "nenhuma medição aumenta a utilidade",
+    node_limit: "limite de nós atingido (plano parcial utilizável)",
+  })[reason] || "fim do ramo";
+}
+
+function renderVoiNode(node) {
+  const realization = node.realization
+    ? `<strong>${escapeHtml(labels[node.realization.attribute] || node.realization.attribute)}=${escapeHtml(node.realization.value)}</strong> (P=${fmtDetailed(node.realization.conditionalProbability)}) — `
+    : "";
+  const scenario = (node.scenario || []).length
+    ? eventLabel(node.scenario)
+    : "sem evidência inicial";
+  const decision = node.choice
+    ? `medir <strong>${escapeHtml(labels[node.choice.observable] || node.choice.observable)}</strong>; VoI=${fmtDetailed(node.choice.voi)}, custo=${fmtCompare(node.choice.cost)}`
+    : `encerrar: ${escapeHtml(voiStopLabel(node.stopReason))}`;
+  const children = (node.children || []).length
+    ? `<ol>${node.children.map(renderVoiNode).join("")}</ol>`
+    : "";
+  return [
+    `<li class="voi-tree-node">`,
+    `<div class="voi-node-card">${realization}P(consulta)=${fmtDetailed(node.queryProbability)}; H=${fmtDetailed(node.entropy)}; orçamento=${fmtCompare(node.remainingBudget)}.<br />Cenário: ${escapeHtml(scenario)}.<br />Decisão: ${decision}.</div>`,
+    children,
+    `</li>`,
+  ].join("");
+}
+
+function renderVoiPlan(result) {
+  lastVoiResult = result;
+  const firstChoice = result.tree?.choice?.observable;
+  voiStatus.textContent = `${result.algorithm}. ${result.summary.nodes} nós, ${result.summary.leaves} folhas e profundidade ${result.summary.maxDepth}.`;
+  voiMetrics.innerHTML = [
+    `<div class="voi-metric"><span>P(consulta) inicial</span><strong>${fmtDetailed(result.initialQueryProbability)}</strong></div>`,
+    `<div class="voi-metric"><span>Entropia inicial (bits)</span><strong>${fmtDetailed(result.initialEntropy)}</strong></div>`,
+    `<div class="voi-metric"><span>Entropia final esperada</span><strong>${fmtDetailed(result.expectedFinalEntropy)}</strong></div>`,
+    `<div class="voi-metric"><span>VoI do plano</span><strong>${fmtDetailed(result.planVoi)}</strong></div>`,
+  ].join("");
+
+  const rankingRows = (result.tree?.ranking || []).map((item, index) => [
+    `<tr>`,
+    `<td>${index + 1}</td>`,
+    `<td>${escapeHtml(labels[item.observable] || item.observable)}${item.observable === firstChoice ? " ★" : ""}</td>`,
+    `<td>${fmtCompare(item.cost)}</td>`,
+    `<td>${fmtDetailed(item.voi)}</td>`,
+    `<td>${fmtDetailed(item.expectedEntropy)}</td>`,
+    `</tr>`,
+  ].join(""));
+  voiRanking.innerHTML = rankingRows.length
+    ? `<table class="voi-table"><thead><tr><th>#</th><th>Observável</th><th>Custo</th><th>VoI</th><th>E[H]</th></tr></thead><tbody>${rankingRows.join("")}</tbody></table>`
+    : `<p>Nenhum observável trouxe ganho de utilidade neste cenário.</p>`;
+  voiTree.innerHTML = `<ol>${renderVoiNode(result.tree)}</ol>`;
+  if (lastQueryResult) renderMathModel(lastQueryResult);
+}
+
+async function runVoiPlan() {
+  runVoiButton.disabled = true;
+  runVoiButton.textContent = "Construindo plano...";
+  voiStatus.textContent = "Calculando VoI de cada observável e expandindo os cenários...";
+  voiMetrics.innerHTML = "";
+  voiRanking.innerHTML = "";
+  voiTree.innerHTML = "";
+
+  try {
+    const response = await fetch("/api/voi/plan", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(buildVoiPayload()),
+    });
+    const result = await readJsonResponse(response);
+    if (!response.ok || !result.ok) throw new Error(result.error || "Erro ao construir o plano de VoI.");
+    renderVoiPlan(result);
+  } catch (error) {
+    voiStatus.textContent = `Erro: ${error.message}`;
+  } finally {
+    runVoiButton.disabled = false;
+    runVoiButton.textContent = "Construir plano condicional";
+  }
+}
+
+async function generateVoiReport() {
+  generateVoiReportButton.disabled = true;
+  generateVoiReportButton.textContent = "Gerando relatório...";
+  downloadVoiReportLink.classList.add("is-hidden");
+  const reportWindow = window.open("", "_blank", "noopener");
+
+  try {
+    const response = await fetch("/api/report/voi", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(buildVoiPayload()),
+    });
+    const result = await readJsonResponse(response);
+    if (!response.ok || !result.ok) throw new Error(result.error || "Erro ao gerar relatório de VoI.");
+    const reportUrl = `${result.reportUrl}?t=${Date.now()}`;
+    downloadVoiReportLink.href = reportUrl;
+    downloadVoiReportLink.classList.remove("is-hidden");
+    voiStatus.textContent = `${result.message} VoI do plano: ${fmtDetailed(result.planVoi)}.`;
+    if (reportWindow) reportWindow.location = reportUrl;
+  } catch (error) {
+    if (reportWindow) reportWindow.close();
+    voiStatus.textContent = `Erro no relatório: ${error.message}`;
+  } finally {
+    generateVoiReportButton.disabled = false;
+    generateVoiReportButton.textContent = "Gerar relatório explicativo de VoI";
+  }
+}
+
+function buildActiveSelectionPayload() {
+  return {
+    ...buildPayload(),
+    budget: Number(activeBudget.value),
+    minimumLiteralOverlap: Number(activeOverlap.value),
+    maxCandidates: Number(activeMaxCandidates.value),
+  };
+}
+
+function renderActiveSelection(result) {
+  lastActiveSelectionResult = result;
+  const active = result.activeSelection;
+  const effort = result.solverEffort;
+  const baselines = result.baselines;
+  const reductionPercent = active.relativeWidthReduction * 100;
+  activeStatus.textContent = [
+    `${result.selectedCount} restrições escolhidas entre ${result.candidatePool.evaluated} candidatas relevantes.`,
+    `Tempo: ${fmtCompare(result.durationSeconds)} s.`,
+  ].join(" ");
+  activeMetrics.innerHTML = [
+    `<div class="voi-metric"><span>Largura inicial U − L</span><strong>${fmtDetailed(result.baseModel.width)}</strong></div>`,
+    `<div class="voi-metric"><span>Largura após seleção</span><strong>${fmtDetailed(active.width)}</strong></div>`,
+    `<div class="voi-metric"><span>Redução do intervalo</span><strong>${reductionPercent.toFixed(2)}%</strong></div>`,
+    `<div class="voi-metric"><span>Chamadas candidatas evitadas</span><strong>${(effort.totalAvoidanceRate * 100).toFixed(2)}%</strong></div>`,
+  ].join("");
+
+  const comparisonRows = [
+    ["Modelo-base", 0, result.baseModel.lower, result.baseModel.upper, result.baseModel.width],
+    ["Seleção ativa", result.selectedCount, active.lower, active.upper, active.width],
+    ["Suporte/confiança", baselines.supportConfidence.selectedCount, baselines.supportConfidence.lower, baselines.supportConfidence.upper, baselines.supportConfidence.width],
+    ["Aleatória (média de 5)", baselines.random.selectedCount, null, null, baselines.random.meanWidth],
+    ["Todas as candidatas relevantes", baselines.allCandidatePool.selectedCount, baselines.allCandidatePool.lower, baselines.allCandidatePool.upper, baselines.allCandidatePool.width],
+    ["Modelo completo atual", result.candidatePool.availableAprioriConstraints, result.fullModel.lower, result.fullModel.upper, result.fullModel.width],
+  ].map((row) => [
+    `<tr>`,
+    `<td>${escapeHtml(row[0])}</td>`,
+    `<td>${row[1]}</td>`,
+    `<td>${fmtDetailed(row[2])}</td>`,
+    `<td>${fmtDetailed(row[3])}</td>`,
+    `<td>${fmtDetailed(row[4])}</td>`,
+    `</tr>`,
+  ].join(""));
+  activeComparison.innerHTML = [
+    `<table class="voi-table"><thead><tr><th>Método</th><th>Restrições</th><th>L</th><th>U</th><th>U − L</th></tr></thead>`,
+    `<tbody>${comparisonRows.join("")}</tbody></table>`,
+  ].join("");
+
+  const traceRows = (active.selectionTrace || []).map((item) => [
+    `<tr>`,
+    `<td>${item.step}</td>`,
+    `<td>${escapeHtml(item.id)}</td>`,
+    `<td>${escapeHtml(item.description)}</td>`,
+    `<td>${item.violatesLowerExtreme ? "sim" : "não"}</td>`,
+    `<td>${item.violatesUpperExtreme ? "sim" : "não"}</td>`,
+    `<td>${item.requiredLpSolves}</td>`,
+    `<td>${fmtDetailed(item.widthAfterSelection)}</td>`,
+    `</tr>`,
+  ].join(""));
+  activeTrace.innerHTML = traceRows.length
+    ? `<table class="voi-table"><thead><tr><th>Passo</th><th>ID</th><th>Restrição</th><th>Viola pL</th><th>Viola pU</th><th>PLs</th><th>U − L</th></tr></thead><tbody>${traceRows.join("")}</tbody></table>`
+    : `<p>Nenhuma candidata alterou ou violou os extremos atuais.</p>`;
+  activeProof.innerHTML = [
+    `<strong>Poda exata:</strong> ${escapeHtml(result.pruningProof)}`,
+    `<br /><strong>Esforço:</strong> ${effort.algebraicEndpointChecks} verificações algébricas substituíram até ${effort.naiveGreedyCandidateLpSolves} reotimizações candidatas; ${effort.exactPruningSavedLpSolves} foram podadas por factibilidade e apenas ${effort.selectedEndpointLpSolves} PLs dos extremos escolhidos foram resolvidos.`,
+    `<br /><strong>Busca exaustiva evitada:</strong> ${escapeHtml(effort.fullSubsetSearchCount)} subconjuntos possíveis sob este orçamento.`,
+    `<br /><strong>Limite científico:</strong> ${escapeHtml(result.limitations)}`,
+  ].join("");
+  if (lastQueryResult) renderMathModel(lastQueryResult);
+}
+
+async function runActiveSelection() {
+  runActiveSelectionButton.disabled = true;
+  runActiveSelectionButton.textContent = "Selecionando e resolvendo...";
+  activeStatus.textContent = "Calculando pL e pU, testando factibilidade e aplicando a poda exata...";
+  activeMetrics.innerHTML = "";
+  activeComparison.innerHTML = "";
+  activeTrace.innerHTML = "";
+  activeProof.innerHTML = "";
+  downloadActiveReportLink.classList.add("is-hidden");
+
+  try {
+    const response = await fetch("/api/active-selection", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(buildActiveSelectionPayload()),
+    });
+    const result = await readJsonResponse(response);
+    if (!response.ok || !result.ok) throw new Error(result.error || "Erro na seleção ativa.");
+    renderActiveSelection(result);
+  } catch (error) {
+    activeStatus.textContent = `Erro: ${error.message}`;
+  } finally {
+    runActiveSelectionButton.disabled = false;
+    runActiveSelectionButton.textContent = "Selecionar restrições para esta consulta";
+  }
+}
+
+async function generateActiveSelectionReport() {
+  generateActiveReportButton.disabled = true;
+  generateActiveReportButton.textContent = "Gerando relatório...";
+  const reportWindow = window.open("", "_blank", "noopener");
+  try {
+    const response = await fetch("/api/report/active-selection", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(buildActiveSelectionPayload()),
+    });
+    const result = await readJsonResponse(response);
+    if (!response.ok || !result.ok) throw new Error(result.error || "Erro no relatório da seleção ativa.");
+    const reportUrl = `${result.reportUrl}?t=${Date.now()}`;
+    downloadActiveReportLink.href = reportUrl;
+    downloadActiveReportLink.classList.remove("is-hidden");
+    activeStatus.textContent = `${result.message} Redução: ${(result.relativeWidthReduction * 100).toFixed(2)}%.`;
+    if (reportWindow) reportWindow.location = reportUrl;
+  } catch (error) {
+    if (reportWindow) reportWindow.close();
+    activeStatus.textContent = `Erro no relatório: ${error.message}`;
+  } finally {
+    generateActiveReportButton.disabled = false;
+    generateActiveReportButton.textContent = "Gerar relatório da seleção ativa";
+  }
+}
+
 function renderSolverComparison(result) {
   const solverResult = result.standaloneSolver;
   const linear = solverResult.linear || {};
@@ -198,7 +482,7 @@ function renderSolverComparison(result) {
   const labels = {
     pA: "P(A)",
     pB: "P(B)",
-    pAB: "P(A e B) empirico (auditoria)",
+    pAB: "P(A e B) empirico (auditoria; nao fixado no PL)",
     support: "Suporte da regra Apriori",
     confidence: "Confianca da regra Apriori",
     lift: "Lift descritivo",
@@ -254,6 +538,7 @@ function renderSolverComparison(result) {
     `</div>`,
     `<p>Resultado do solver separado padrao: <strong>${intervalTextValue}</strong>. O painel abaixo compara esse resultado com o calculo principal do projeto e com os 3 metodos executados.</p>`,
     `<p><strong>Solvers executados:</strong> SciPy HiGHS, HiGHS Dual Simplex e HiGHS Interior Point. Gurobi, lp_solve e cuPDLP-C ficam documentados como comparacao tecnica.</p>`,
+    `<p><strong>Selecao ativa:</strong> a nova camada escolhe restricoes e chama o HiGHS somente para os extremos pL/pU que forem violados. O planejador de medicoes que reproduz o artigo permanece separado e nao usa linprog.</p>`,
     `<p><strong>Tempo de execucao:</strong> ${escapeHtml(timing.message || "Tempo de execucao indisponivel para comparacao.")}</p>`,
   ].join("");
   solverComparison.innerHTML = [
@@ -291,6 +576,16 @@ function renderMathModel(result) {
         .map((rule) => `<code>${eventLabel(rule.antecedent)} -> ${eventLabel(rule.consequent)}; sup=${fmt(rule.support)}, conf=${fmt(rule.confidence)}, lift=${fmt(rule.lift)}</code>`)
         .join("")
     : "<code>Nenhuma regra Apriori foi gerada.</code>";
+  const voi = lastVoiResult;
+  const voiCrop = voi?.target?.value || voiTargetValue?.value || "cultura";
+  const voiFirstChoice = voi?.tree?.choice?.observable;
+  const voiSummary = voi
+    ? `<code>P(recomendar(${escapeHtml(voiCrop)})) = ${fmtDetailed(voi.initialQueryProbability)}</code><code>H inicial = ${fmtDetailed(voi.initialEntropy)} bits</code><code>E[H final] = ${fmtDetailed(voi.expectedFinalEntropy)} bits</code><code>VoI(plano) = ${fmtDetailed(voi.planVoi)} bits</code>`
+    : `<code>Execute o experimento de VoI para preencher os valores numericos.</code>`;
+  const active = lastActiveSelectionResult;
+  const activeSummary = active
+    ? `<code>W(F0) = ${fmtDetailed(active.baseModel.width)}</code><code>W(FK) = ${fmtDetailed(active.activeSelection.width)}</code><code>Delta W = ${fmtDetailed(active.activeSelection.widthReduction)} (${(active.activeSelection.relativeWidthReduction * 100).toFixed(2)}%)</code><code>${active.selectedCount} de ${active.candidatePool.evaluated} restricoes relevantes selecionadas</code><code>${active.solverEffort.selectedEndpointLpSolves} reotimizacoes; ${(active.solverEffort.exactPruningRate * 100).toFixed(2)}% podadas por factibilidade; ${(active.solverEffort.totalAvoidanceRate * 100).toFixed(2)}% evitadas no total</code>`
+    : `<code>Execute a selecao ativa para preencher os valores numericos.</code>`;
 
   mathModel.innerHTML = [
     `<section class="math-block"><h3>1. Preparacao da base</h3><p>O projeto le o dataset de recomendacao de culturas, transforma atributos numericos em faixas categoricas e deixa cada registro pronto para perguntas do tipo <strong>P(A | B)</strong>. Nesta consulta, A = <strong>${aLabel}</strong> e B = <strong>${bLabel}</strong>.</p><div class="constraint-list"><code>A = ${aLabel}</code><code>B = ${bLabel}</code><code>A e B = ${abLabel}</code></div></section>`,
@@ -302,6 +597,13 @@ function renderMathModel(result) {
     `<section class="math-block"><h3>7. Consulta condicional</h3><p>A pergunta final continua sendo probabilistica: qual intervalo e possivel para A quando B ocorre, respeitando as evidencias da base e as regras liberadas?</p><code>P(A | B) = P(A e B) / P(B) = sum(x<sub>w</sub> onde ${abLabel}) / sum(x<sub>w</sub> onde ${bLabel})</code></section>`,
     `<section class="math-block"><h3>8. Charnes-Cooper</h3><p>Como P(A | B) e uma razao, o modelo aplica Charnes-Cooper para transformar o problema fracionario em programacao linear.</p><div class="constraint-list"><code>y<sub>w</sub> = x<sub>w</sub> / P(B)</code><code>t = 1 / P(B)</code><code>sum(y<sub>w</sub> onde B) = 1</code><code>A y - b t <= 0</code><code>sum<sub>w em W</sub> y<sub>w</sub> - t = 0</code></div></section>`,
     `<section class="math-block"><h3>9. Solver</h3><p>O HiGHS resolve dois programas lineares: um minimiza e outro maximiza a massa dos mundos que satisfazem A e B. A comparacao executa highs, highs-ds e highs-ipm para avaliar consistencia numerica e tempo.</p><div class="constraint-list"><code>min sum(y<sub>w</sub> onde ${abLabel})</code><code>max sum(y<sub>w</sub> onde ${abLabel})</code><code>restricoes lineares: ${constraintCount}</code></div><p><strong>Resultado:</strong> ${interval}.</p></section>`,
+    `<section class="math-block"><h3>10. Adaptacao: informacao como restricao</h3><p>A contribuicao principal troca o observavel do artigo por uma restricao probabilistica Apriori candidata. O conjunto-base F0 contem marginais e pares; cada Cj adiciona suporte ou confianca relevante para os literais da consulta.</p><div class="constraint-list"><code>F0 = {z : A0 z &lt;= 0, E z = d, z &gt;= 0}</code><code>C = {Cj : regra Apriori compartilha literais com A e B}</code><code>W(F) = U(F) - L(F)</code><code>ganho(Cj | F) = W(F) - W(F intersecao Cj)</code></div></section>`,
+    `<section class="math-block"><h3>11. Poda exata pelos extremos</h3><p>Se a solucao extrema atual satisfaz Cj, ela continua factivel depois da inclusao. Como o novo conjunto e um subconjunto do anterior, aquele valor otimo nao muda. Portanto, somente extremos violados sao reotimizados.</p><div class="constraint-list"><code>zL = argmin q(z), zU = argmax q(z)</code><code>se A(Cj) zL &lt;= 0, entao L(F intersecao Cj) = L(F)</code><code>se A(Cj) zU &lt;= 0, entao U(F intersecao Cj) = U(F)</code><code>caso viole: resolver apenas o respectivo min ou max</code></div></section>`,
+    `<section class="math-block"><h3>12. Selecao gulosa orientada pela consulta</h3><p>Em cada passo, todas as candidatas restantes sao verificadas por multiplicacao matriz-vetor, sem chamar o solver. A restricao mais violada pelos extremos e incluida; depois os extremos afetados sao atualizados.</p><div class="constraint-list"><code>score(Cj) = max(0, max(A(Cj)zL), max(A(Cj)zU))</code><code>Ck = argmax score(Cj)</code><code>F(k+1) = Fk intersecao Ck</code><code>parar quando k = orcamento ou todos os extremos satisfazem C</code></div></section>`,
+    `<section class="math-block"><h3>13. Custo computacional e baselines</h3><p>A verificacao e algebrica. A selecao resolve no maximo dois PLs por restricao escolhida, enquanto pontuar todas as candidatas por reotimizacao exigiria dois PLs para cada candidata em cada passo. O experimento compara o mesmo orcamento com sorteio e suporte/confianca.</p><div class="constraint-list"><code>PLs da selecao &lt;= 2K + 2 PLs iniciais</code><code>busca exaustiva de lotes = combinacao(|C|, K)</code><code>baselines = aleatorio e ranking suporte x confianca</code></div></section>`,
+    `<section class="math-block"><h3>14. Resultado da selecao ativa</h3><p>Os testes de factibilidade sao exatos; a ordem pela maior violacao e uma heuristica e nao garante o subconjunto globalmente otimo. O resultado abaixo usa a consulta atual da interface.</p><div class="constraint-list">${activeSummary}</div></section>`,
+    `<section class="math-block"><h3>15. Reproducao fiel do VoI do artigo</h3><p>Como experimento-base separado, q e a proposicao recomendar(cultura), os atributos de solo/clima sao observaveis com custo e a utilidade e o negativo da entropia binaria. A Figura 3 escolhe o maior VoI que cabe no orcamento.</p><div class="constraint-list"><code>q = recomendar(${escapeHtml(voiCrop)})</code><code>H(q|s) = -P(q|s)log2 P(q|s) - P(nao q|s)log2 P(nao q|s)</code><code>VoI(O,q,Sb) = soma_o P(o|b) Utility(q,S_(b uniao o)) - Utility(q,Sb)</code><code>Cn = argmax VoI({C},q,Sn), sujeito a cost(C) &lt;= Bn</code>${voiSummary}</div></section>`,
+    `<section class="math-block"><h3>16. Separacao correta dos mecanismos</h3><p>HiGHS calcula os limites do modelo intervalar e tambem reotimiza somente os extremos violados na selecao ativa. O planejador de medicoes do artigo nao chama linprog: ele usa enumeracao dos mundos, entropia e arvore condicional.</p><div class="constraint-list"><code>HiGHS: min/max P(A | B) e atualizacao seletiva de pL/pU</code><code>selecao ativa: camada gulosa que decide quais restricoes incluir</code><code>VoI original: E[utilidade apos observacao] - utilidade atual</code></div></section>`,
   ].join("");
 }
 
@@ -318,6 +620,12 @@ async function runQuery() {
   probabilityText.innerHTML = "<div>Calculando consulta...</div>";
   linearProgram.textContent = "";
   mathModel.innerHTML = "";
+  lastActiveSelectionResult = null;
+  activeStatus.textContent = "Consulta alterada: execute novamente a seleção ativa.";
+  activeMetrics.innerHTML = "";
+  activeComparison.innerHTML = "";
+  activeTrace.innerHTML = "";
+  activeProof.innerHTML = "";
   const payload = buildPayload();
 
   try {
@@ -328,6 +636,7 @@ async function runQuery() {
     });
     const result = await readJsonResponse(response);
     if (!response.ok || !result.ok) throw new Error(result.error || "Erro na consulta.");
+    lastQueryResult = result;
 
     const queriedRule = result.queriedAssociationRule || null;
     const releasedRule = ruleFromResult(result);
@@ -588,10 +897,19 @@ async function boot() {
   domains = metadata.domains;
   labels = metadata.labels;
   attributes = metadata.attributes;
+  voiMetadata = metadata.voi || {};
+  activeMetadata = metadata.activeSelection || {};
 
   fillSelect(targetAttribute, attributes, (item) => labels[item] || item);
   targetAttribute.value = attributes.includes("label") ? "label" : attributes[attributes.length - 1];
   fillValueSelect(targetAttribute, targetValue);
+  fillSelect(voiTargetValue, domains.label || []);
+  if ((domains.label || []).includes("rice")) voiTargetValue.value = "rice";
+  voiBudget.value = voiMetadata.defaultBudget ?? 2;
+  activeBudget.value = activeMetadata.defaultBudget ?? 25;
+  activeOverlap.value = activeMetadata.defaultMinimumLiteralOverlap ?? 2;
+  activeMaxCandidates.value = activeMetadata.defaultMaxCandidates ?? 80;
+  renderVoiObservables(voiMetadata.observables || []);
 
   targetAttribute.addEventListener("change", () => fillValueSelect(targetAttribute, targetValue));
   addConditionButton.addEventListener("click", () => createConditionRow());
@@ -600,6 +918,10 @@ async function boot() {
   compareSolverButton.addEventListener("click", compareSolver);
   generateSolverReportButton.addEventListener("click", generateSolverReport);
   generateFullLinearProgramButton.addEventListener("click", () => generateFullLinearProgram(false));
+  runVoiButton.addEventListener("click", runVoiPlan);
+  generateVoiReportButton.addEventListener("click", generateVoiReport);
+  runActiveSelectionButton.addEventListener("click", runActiveSelection);
+  generateActiveReportButton.addEventListener("click", generateActiveSelectionReport);
   downloadFullLinearProgramLink.addEventListener("click", (event) => {
     event.preventDefault();
     if (downloadFullLinearProgramLink.classList.contains("is-disabled")) return;
@@ -615,6 +937,7 @@ async function boot() {
   if (secondCondition) createConditionRow(secondCondition, domains[secondCondition]?.[0]);
   datasetStatus.textContent = `${metadata.total} registros carregados`;
   runQuery();
+  runVoiPlan();
 }
 
 boot().catch((error) => {

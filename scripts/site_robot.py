@@ -39,6 +39,21 @@ MISSING_RULE_QUERY = {
         {"attribute": "P", "value": "alto"},
     ],
 }
+REFERENCE_VOI = {
+    "target": {"attribute": "label", "value": "rice"},
+    "budget": 2,
+    "maxNodes": 400,
+    "observables": [
+        {"attribute": attribute, "cost": 1}
+        for attribute in ("N", "P", "K", "temperature", "humidity", "ph", "rainfall")
+    ],
+}
+REFERENCE_ACTIVE_SELECTION = {
+    **REFERENCE_QUERY,
+    "budget": 25,
+    "minimumLiteralOverlap": 2,
+    "maxCandidates": 80,
+}
 
 
 class RobotFailure(RuntimeError):
@@ -185,6 +200,10 @@ def robot_run(
             "Resumo didático",
             "Gerar modelo auditável",
             "Baixar matrizes exatas em TXT",
+            "Contribuição principal — Seleção Ativa de Restrições",
+            "Reprodução do Artigo — Valor da Informação",
+            "Gerar relatório da seleção ativa",
+            "Gerar relatório explicativo de VoI",
         ]
         for label in expected_labels:
             require(label in home_text, f"Rotulo ausente na interface: {label}")
@@ -200,11 +219,19 @@ def robot_run(
         require(metadata.get("omegaWorlds") == 466, "Quantidade de mundos diferente de 466")
         apriori = metadata.get("apriori") or {}
         require(apriori.get("ruleCount") == 5312, "Quantidade de regras Apriori diferente de 5.312")
+        voi = metadata.get("voi") or {}
+        require(len(voi.get("observables") or []) == 7, "Catalogo de observaveis de VoI incompleto")
+        require((voi.get("article") or {}).get("doi") == "10.4204/EPTCS.306.14", "Artigo-base de VoI incorreto")
+        active = metadata.get("activeSelection") or {}
+        require(active.get("defaultBudget") == 25, "Orcamento padrao da selecao ativa incorreto")
         state["metadata"] = metadata
         return {
             "records": metadata["total"],
             "worlds": metadata["omegaWorlds"],
             "apriori_rules": apriori["ruleCount"],
+            "voi_observables": len(voi["observables"]),
+            "voi_article_doi": voi["article"]["doi"],
+            "active_selection_budget": active["defaultBudget"],
         }
 
     checks.append(run_check("dataset_e_apriori", check_metadata))
@@ -243,6 +270,73 @@ def robot_run(
         }
 
     checks.append(run_check("consulta_de_referencia", check_query))
+
+    def check_voi_plan() -> dict[str, Any]:
+        result = client.json("/api/voi/plan", method="POST", payload=REFERENCE_VOI)
+        require(result.get("ok") is True, f"Plano de VoI recusado: {result.get('error')}")
+        require(result.get("method") == "greedy_conditional_plan", "Metodo de VoI incorreto")
+        require(close_to(result.get("initialQueryProbability"), 1 / 22), "Probabilidade inicial de rice incorreta")
+        require(close_to(result.get("initialEntropy"), 0.26676498780302604), "Entropia inicial incorreta")
+        require(close_to(result.get("expectedFinalEntropy"), 0.10858243722262287), "Entropia final esperada incorreta")
+        require(close_to(result.get("planVoi"), 0.15818255058040318), "VoI do plano incorreto")
+        tree = result.get("tree") or {}
+        choice = tree.get("choice") or {}
+        require(choice.get("observable") == "rainfall", "Primeiro observavel de rice deveria ser rainfall")
+        require(len(tree.get("ranking") or []) == 7, "Ranking inicial de VoI deveria ter 7 observaveis")
+        summary = result.get("summary") or {}
+        require(summary.get("nodes") == 7, "Plano de rice deveria possuir 7 nos")
+        require(summary.get("leaves") == 5, "Plano de rice deveria possuir 5 folhas")
+        computation = result.get("computation") or {}
+        require(computation.get("linearSolverUsed") is False, "VoI foi descrito incorretamente como solver linear")
+        state["voi"] = result
+        return {
+            "first_observable": choice["observable"],
+            "initial_entropy": result["initialEntropy"],
+            "expected_final_entropy": result["expectedFinalEntropy"],
+            "plan_voi": result["planVoi"],
+            "nodes": summary["nodes"],
+            "linear_solver_used": computation["linearSolverUsed"],
+        }
+
+    checks.append(run_check("plano_voi_do_artigo", check_voi_plan))
+
+    def check_active_selection() -> dict[str, Any]:
+        result = client.json(
+            "/api/active-selection",
+            method="POST",
+            payload=REFERENCE_ACTIVE_SELECTION,
+        )
+        require(result.get("ok") is True, f"Selecao ativa recusada: {result.get('error')}")
+        require(result.get("method") == "greedy_query_directed_endpoint_pruning", "Metodo ativo incorreto")
+        require(result.get("selectedCount") == 25, "A selecao deveria usar 25 restricoes")
+        pool = result.get("candidatePool") or {}
+        require(pool.get("evaluated") == 52, "A consulta de arroz deveria avaliar 52 candidatas")
+        base_model = result.get("baseModel") or {}
+        active = result.get("activeSelection") or {}
+        require(close_to(base_model.get("width"), 0.023265306122449037), "Largura-base inesperada")
+        require(close_to(active.get("width"), 0.019084049685785698), "Largura ativa inesperada")
+        require(close_to(active.get("relativeWidthReduction"), 0.17972067140044132), "Reducao ativa inesperada")
+        require(len(active.get("selectionTrace") or []) == 25, "Rastro ativo incompleto")
+        baselines = result.get("baselines") or {}
+        require(active["width"] < baselines["supportConfidence"]["width"], "Ativo nao superou suporte/confianca")
+        require(active["width"] < baselines["random"]["meanWidth"], "Ativo nao superou a media aleatoria")
+        effort = result.get("solverEffort") or {}
+        require(effort.get("selectedEndpointLpSolves") == 43, "Quantidade de reotimizacoes inesperada")
+        require(float(effort.get("exactPruningRate", 0)) > 0.70, "Poda exata abaixo da referencia")
+        require(float(effort.get("totalAvoidanceRate", 0)) > 0.97, "Economia total abaixo da referencia")
+        state["active_selection"] = result
+        return {
+            "selected": result["selectedCount"],
+            "candidates": pool["evaluated"],
+            "base_width": base_model["width"],
+            "active_width": active["width"],
+            "relative_reduction": active["relativeWidthReduction"],
+            "endpoint_lp_solves": effort["selectedEndpointLpSolves"],
+            "exact_pruning_rate": effort["exactPruningRate"],
+            "total_avoidance_rate": effort["totalAvoidanceRate"],
+        }
+
+    checks.append(run_check("selecao_ativa_de_restricoes", check_active_selection))
 
     def check_missing_rule() -> dict[str, Any]:
         result = client.json("/api/query", method="POST", payload=MISSING_RULE_QUERY)
@@ -371,6 +465,47 @@ def robot_run(
             }
 
         checks.append(run_check("relatorio_pdf", check_pdf))
+
+        def check_voi_pdf() -> dict[str, Any]:
+            generated = client.json("/api/report/voi", method="POST", payload=REFERENCE_VOI)
+            require(generated.get("ok") is True, f"Relatorio de VoI falhou: {generated.get('error')}")
+            require(close_to(generated.get("planVoi"), 0.15818255058040318), "PDF de VoI usou plano diferente")
+            pdf, headers = client.request(generated["reportUrl"])
+            require(pdf.startswith(b"%PDF-"), "Relatorio de VoI nao possui cabecalho PDF")
+            require(len(pdf) > 6_000, "Relatorio de VoI esta pequeno demais")
+            return {
+                "bytes": len(pdf),
+                "content_type": headers.get("Content-Type", ""),
+                "report_url": generated["reportUrl"],
+                "plan_voi": generated["planVoi"],
+            }
+
+        checks.append(run_check("relatorio_pdf_voi", check_voi_pdf))
+
+        def check_active_pdf() -> dict[str, Any]:
+            generated = client.json(
+                "/api/report/active-selection",
+                method="POST",
+                payload=REFERENCE_ACTIVE_SELECTION,
+            )
+            require(generated.get("ok") is True, f"Relatorio ativo falhou: {generated.get('error')}")
+            require(generated.get("selectedCount") == 25, "PDF ativo usou selecao diferente")
+            require(close_to(generated.get("relativeWidthReduction"), 0.17972067140044132), "PDF ativo usou reducao diferente")
+            require(float(generated.get("exactPruningRate", 0)) > 0.70, "PDF ativo perdeu a poda de referencia")
+            require(float(generated.get("totalAvoidanceRate", 0)) > 0.97, "PDF ativo perdeu a economia total")
+            pdf, headers = client.request(generated["reportUrl"])
+            require(pdf.startswith(b"%PDF-"), "Relatorio ativo nao possui cabecalho PDF")
+            require(len(pdf) > 8_000, "Relatorio ativo esta pequeno demais")
+            return {
+                "bytes": len(pdf),
+                "content_type": headers.get("Content-Type", ""),
+                "report_url": generated["reportUrl"],
+                "relative_width_reduction": generated["relativeWidthReduction"],
+                "exact_pruning_rate": generated["exactPruningRate"],
+                "total_avoidance_rate": generated["totalAvoidanceRate"],
+            }
+
+        checks.append(run_check("relatorio_pdf_selecao_ativa", check_active_pdf))
 
         def check_solver_pdf() -> dict[str, Any]:
             generated = client.json(

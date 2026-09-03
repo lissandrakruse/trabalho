@@ -14,7 +14,10 @@ from typing import Any
 
 from flask import Flask, jsonify, request, send_from_directory
 
+from active_selection import select_active_constraints
 from apriori_rules import mine_apriori_rules
+from voi import ARTICLE as VOI_ARTICLE
+from voi import DEFAULT_MAX_NODES, DEFAULT_OBSERVABLE_COST, build_conditional_plan
 
 
 # MAPA DO EXERCICIO
@@ -32,6 +35,8 @@ DATASET_PATH = ROOT / "data" / "Crop_recommendation.csv"
 GENERATED_REPORT_DIR = ROOT / "reports" / "generated"
 QUERY_REPORT_PATH = GENERATED_REPORT_DIR / "relatorio_consulta_atual.pdf"
 SOLVER_COMPARISON_REPORT_PATH = GENERATED_REPORT_DIR / "relatorio_comparacao_solver.pdf"
+VOI_REPORT_PATH = GENERATED_REPORT_DIR / "relatorio_voi_agricultura.pdf"
+ACTIVE_SELECTION_REPORT_PATH = GENERATED_REPORT_DIR / "relatorio_selecao_ativa.pdf"
 FULL_LINEAR_PROGRAM_PATH = GENERATED_REPORT_DIR / "programa_linear_completo.txt"
 APRIORI_MIN_SUPPORT = 0.01
 APRIORI_MIN_CONFIDENCE = 0.0
@@ -1279,8 +1284,224 @@ def metadata():
                 for key, value in mining.items()
                 if key != "rules"
             },
+            "voi": {
+                "article": VOI_ARTICLE,
+                "targetAttribute": "label",
+                "observables": [
+                    {
+                        "attribute": attribute,
+                        "label": data["labels"][attribute],
+                        "cost": DEFAULT_OBSERVABLE_COST,
+                        "outcomes": data["domains"][attribute],
+                    }
+                    for attribute in data["numericAttributes"]
+                ],
+                "defaultBudget": 2.0,
+                "defaultMaxNodes": DEFAULT_MAX_NODES,
+                "utility": "negative_binary_entropy",
+            },
+            "activeSelection": {
+                "target": "restricoes Apriori relevantes para a consulta intervalar",
+                "defaultBudget": 25,
+                "defaultMinimumLiteralOverlap": 2,
+                "defaultMaxCandidates": 80,
+                "objective": "reduzir a largura U-L de P(A|B)",
+                "selection": "maior violacao dos extremos p_L e p_U",
+                "pruning": "reotimizar somente o extremo que viola a nova restricao",
+            },
         }
     )
+
+
+def compute_voi_plan(payload: dict[str, Any]) -> dict[str, Any]:
+    """Adapta o algoritmo da Figura 3 do artigo ao dominio agricola."""
+
+    data = load_dataset()
+    target_payload = payload.get("target") or {
+        "attribute": "label",
+        "value": payload.get("targetCrop", ""),
+    }
+    target = valid_conditions([target_payload], data["domains"])[0]
+    if target["attribute"] != "label":
+        raise ValueError("O experimento agricola de VoI usa uma cultura como consulta ground.")
+
+    evidence = valid_conditions(payload.get("evidence", []), data["domains"])
+    measured_attributes = {item["attribute"] for item in evidence}
+    allowed_observables = set(data["numericAttributes"])
+    requested = payload.get("observables")
+    if requested is None:
+        requested = [
+            {"attribute": attribute, "cost": DEFAULT_OBSERVABLE_COST}
+            for attribute in data["numericAttributes"]
+            if attribute not in measured_attributes
+        ]
+    if not isinstance(requested, list) or not requested:
+        raise ValueError("Selecione ao menos um observavel agricola.")
+
+    observables: list[str] = []
+    costs: dict[str, float] = {}
+    for item in requested:
+        if not isinstance(item, dict):
+            raise ValueError("Cada observavel deve informar atributo e custo.")
+        attribute = str(item.get("attribute", "")).strip()
+        if attribute not in allowed_observables:
+            raise ValueError(f"O atributo {attribute or '-'} nao e um observavel agricola valido.")
+        if attribute in measured_attributes:
+            continue
+        if attribute in costs:
+            raise ValueError(f"O observavel {attribute} foi informado mais de uma vez.")
+        try:
+            cost = float(item.get("cost", DEFAULT_OBSERVABLE_COST))
+        except (TypeError, ValueError) as error:
+            raise ValueError(f"Custo invalido para {attribute}.") from error
+        observables.append(attribute)
+        costs[attribute] = cost
+    if not observables:
+        raise ValueError("Todos os observaveis selecionados ja pertencem ao cenario.")
+
+    try:
+        budget = float(payload.get("budget", 2.0))
+        max_nodes = int(payload.get("maxNodes", DEFAULT_MAX_NODES))
+    except (TypeError, ValueError) as error:
+        raise ValueError("Orcamento ou limite de nos invalido.") from error
+    if max_nodes > 1000:
+        raise ValueError("O limite maximo da interface e 1.000 nos.")
+
+    plan = build_conditional_plan(
+        data["worlds"],
+        target,
+        observables,
+        costs,
+        budget,
+        evidence,
+        max_nodes=max_nodes,
+    )
+    plan["ok"] = True
+    plan["domain"] = {
+        "name": "recomendacao de culturas por solo e clima",
+        "records": data["total"],
+        "worlds": len(data["worlds"]),
+        "query": f"recomendar({target['value']})",
+        "labels": data["labels"],
+    }
+    plan["interpretation"] = (
+        "O plano escolhe a proxima medicao com maior reducao esperada da entropia "
+        "da consulta, entre as medicoes cujo custo cabe no orcamento restante. "
+        "A escolha seguinte depende do resultado observado anteriormente."
+    )
+    plan["computation"] = {
+        "probabilityInference": "enumeracao exata dos mundos observados de Omega",
+        "observationOptimizer": "plano condicional guloso em largura (Figura 3)",
+        "linearSolverUsed": False,
+        "separation": (
+            "HiGHS resolve somente os limites do modelo linear intervalar P(A|B). "
+            "O plano de VoI usa probabilidades condicionais, entropia e busca gulosa."
+        ),
+    }
+    return plan
+
+
+@lru_cache(maxsize=8)
+def _cached_active_selection(payload_json: str) -> dict[str, Any]:
+    payload = json.loads(payload_json)
+    data = load_dataset()
+    query_payload = {
+        "target": payload.get("target", {}),
+        "conditions": payload.get("conditions", []),
+    }
+    query_result = compute_query(query_payload)
+    if not query_result["linear"].get("ok"):
+        raise ValueError(query_result["linear"].get("error", "Consulta linear invalida."))
+
+    try:
+        budget = int(payload.get("budget", 25))
+        minimum_overlap = int(payload.get("minimumLiteralOverlap", 2))
+        max_candidates = int(payload.get("maxCandidates", 80))
+    except (TypeError, ValueError) as error:
+        raise ValueError("Parametros da selecao ativa devem ser inteiros.") from error
+    if budget < 0 or budget > 60:
+        raise ValueError("O orcamento de restricoes deve estar entre 0 e 60.")
+    if minimum_overlap < 1 or minimum_overlap > 3:
+        raise ValueError("A sobreposicao de literais deve estar entre 1 e 3.")
+    if max_candidates < 1 or max_candidates > 120:
+        raise ValueError("O limite de candidatos deve estar entre 1 e 120.")
+
+    target = query_result["target"]
+    base = query_result["conditions"]
+    model_worlds, completion_count = complete_unobserved_query_worlds(
+        data["worlds"],
+        data["rows"],
+        target,
+        base,
+    )
+    model = build_transformed_linear_program(
+        model_worlds,
+        data["rows"],
+        target,
+        base,
+    )
+    result = select_active_constraints(
+        model,
+        target,
+        base,
+        budget=budget,
+        minimum_literal_overlap=minimum_overlap,
+        max_candidates=max_candidates,
+    )
+    full_lower = float(query_result["linear"]["lower"])
+    full_upper = float(query_result["linear"]["upper"])
+    full_width = max(0.0, full_upper - full_lower)
+    base_width = result["baseModel"]["width"]
+    active_reduction = result["activeSelection"]["widthReduction"]
+    maximum_known_reduction = max(0.0, base_width - full_width)
+    result.update(
+        {
+            "ok": True,
+            "fullModel": {
+                "lower": full_lower,
+                "upper": full_upper,
+                "width": full_width,
+                "constraintRecords": len(model["records"]),
+                "inequalityRows": len(model["aUb"]),
+                "queryCompletionWorlds": completion_count,
+                "modelDigest": query_result["linear"]["modelDigest"],
+            },
+            "recoveredFullModelReduction": (
+                active_reduction / maximum_known_reduction
+                if maximum_known_reduction > 0
+                else 0.0
+            ),
+            "researchQuestion": (
+                "Uma selecao ativa orientada pela consulta identifica regras ou restricoes "
+                "que reduzem o intervalo usando menos informacoes que a selecao aleatoria "
+                "ou baseada apenas em suporte e confianca?"
+            ),
+            "hypothesis": (
+                "A poda exata dos extremos combinada com escolha gulosa por violacao reduz "
+                "mais a largura U-L, sob o mesmo orcamento, do que os baselines."
+            ),
+            "pruningProof": (
+                "Se p_L satisfaz C, ele continua factivel em F intersecao C; como esse "
+                "conjunto e subconjunto de F, o limite inferior permanece L. O mesmo "
+                "argumento vale para p_U e o limite superior."
+            ),
+            "interpretation": (
+                "Os testes de factibilidade nos extremos sao podas exatas. A ordem de "
+                "escolha pela maior violacao e gulosa e deve ser avaliada empiricamente."
+            ),
+        }
+    )
+    return result
+
+
+def compute_active_selection(payload: dict[str, Any]) -> dict[str, Any]:
+    payload_json = json.dumps(
+        payload,
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return _cached_active_selection(payload_json)
 
 
 def _compute_query_uncached(
@@ -1623,6 +1844,28 @@ def query():
     return jsonify(result)
 
 
+@app.post("/api/voi/plan")
+def voi_plan():
+    try:
+        result = compute_voi_plan(request.get_json(force=True))
+    except ValueError as error:
+        return jsonify({"ok": False, "error": str(error)}), 400
+    except Exception as error:
+        return jsonify({"ok": False, "error": f"Erro ao construir plano de VoI: {error}"}), 500
+    return jsonify(result)
+
+
+@app.post("/api/active-selection")
+def active_selection():
+    try:
+        result = compute_active_selection(request.get_json(force=True))
+    except ValueError as error:
+        return jsonify({"ok": False, "error": str(error)}), 400
+    except RuntimeError as error:
+        return jsonify({"ok": False, "error": str(error)}), 500
+    return jsonify(result)
+
+
 @app.post("/api/linear-program/full")
 def full_linear_program():
     try:
@@ -1755,7 +1998,7 @@ def write_query_report(result: dict[str, Any]) -> None:
         from reportlab.lib.pagesizes import A4
         from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
         from reportlab.lib.units import cm
-        from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+        from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
     except Exception as error:
         raise RuntimeError(f"ReportLab indisponivel para gerar PDF: {error}") from error
 
@@ -1773,22 +2016,48 @@ def write_query_report(result: dict[str, Any]) -> None:
     body = ParagraphStyle(
         "BodyCustom",
         parent=styles["BodyText"],
-        fontSize=10,
-        leading=14,
-        spaceAfter=6,
+        fontSize=9.2,
+        leading=12.5,
+        spaceAfter=4,
+    )
+    table_cell = ParagraphStyle(
+        "QueryTableCell",
+        parent=body,
+        fontSize=8.2,
+        leading=10.2,
+        spaceAfter=0,
+    )
+    table_header = ParagraphStyle(
+        "QueryTableHeader",
+        parent=table_cell,
+        fontName="Helvetica-Bold",
+        textColor=colors.white,
+    )
+    reference = ParagraphStyle(
+        "QueryReference",
+        parent=body,
+        fontSize=7.7,
+        leading=9.4,
+        spaceAfter=0,
     )
     code = ParagraphStyle(
         "CodeCustom",
         parent=styles["Code"],
         fontName="Courier",
-        fontSize=8,
-        leading=10,
+        fontSize=7.2,
+        leading=8.6,
         backColor=colors.HexColor("#f3f4f6"),
-        borderPadding=6,
+        borderPadding=5,
     )
 
-    def table(rows: list[list[str]]) -> Table:
-        created = Table(rows, colWidths=[5.5 * cm, 10.1 * cm])
+    def table(rows: list[list[Any]]) -> Table:
+        prepared = []
+        for row_index, row in enumerate(rows):
+            cell_style = table_header if row_index == 0 else table_cell
+            prepared.append(
+                [cell if hasattr(cell, "wrap") else Paragraph(str(cell), cell_style) for cell in row]
+            )
+        created = Table(prepared, colWidths=[6.4 * cm, 9.2 * cm], repeatRows=1)
         created.setStyle(
             TableStyle(
                 [
@@ -1798,6 +2067,10 @@ def write_query_report(result: dict[str, Any]) -> None:
                     ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
                     ("FONTSIZE", (0, 0), (-1, -1), 9),
                     ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                    ("TOPPADDING", (0, 0), (-1, -1), 4),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
                     ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f7faf9")]),
                 ]
             )
@@ -1884,6 +2157,7 @@ def write_query_report(result: dict[str, Any]) -> None:
         Spacer(1, 0.18 * cm),
         Paragraph("Conclusao", styles["Heading2"]),
         Paragraph(result["conclusion"], body),
+        PageBreak(),
         Paragraph("Formulacao matematica resumida", styles["Heading2"]),
         Paragraph(
             "A formulacao abaixo e didatica. O TXT auditavel, gerado na interface, "
@@ -1898,13 +2172,24 @@ def write_query_report(result: dict[str, Any]) -> None:
             "arredondamento e permitir modelagem consistente das restricoes lineares.",
             body,
         ),
-        Paragraph("Referencias bibliograficas", styles["Heading2"]),
+        Paragraph("Relacao com a selecao ativa de informacao", styles["Heading2"]),
         Paragraph(
-            "Nilsson, N. J. Probabilistic Logic. Artificial Intelligence, 1986.<br/>"
+            "Este relatorio fornece os extremos p_L e p_U usados pela contribuicao principal. "
+            "Para cada restricao Apriori candidata, a selecao ativa testa algebricamente se "
+            "p_L e p_U a satisfazem. Um extremo satisfeito preserva exatamente seu limite; "
+            "somente um extremo violado e reotimizado com HiGHS. A ordem de inclusao e gulosa "
+            "pela maior violacao, e a utilidade observada e a reducao da largura U-L. O plano "
+            "de medicoes por entropia reproduz Ghosh e Ramakrishnan (2019) como experimento-base "
+            "separado.",
+            reference,
+        ),
+        Paragraph(
+            "<b>Referencias bibliograficas.</b> Nilsson, N. J. Probabilistic Logic. Artificial Intelligence, 1986.<br/>"
             "Charnes, A.; Cooper, W. W. Programming with linear fractional functionals. Naval Research Logistics Quarterly, 1962.<br/>"
             "Tessem, B. Interval probability propagation. International Journal of Approximate Reasoning, 1992.<br/>"
-            "Agrawal, R.; Srikant, R. Fast algorithms for mining association rules. VLDB, 1994.",
-            body,
+            "Agrawal, R.; Srikant, R. Fast algorithms for mining association rules. VLDB, 1994.<br/>"
+            "Ghosh, S.; Ramakrishnan, C. R. Value of Information in Probabilistic Logic Programs. EPTCS 306, 2019, p. 71-84. DOI: 10.4204/EPTCS.306.14.",
+            reference,
         ),
     ]
 
@@ -1948,11 +2233,33 @@ def write_solver_comparison_report(result: dict[str, Any]) -> None:
         leading=14,
         spaceAfter=6,
     )
+    table_cell = ParagraphStyle(
+        "SolverTableCell",
+        parent=body,
+        fontSize=7,
+        leading=8.4,
+        spaceAfter=0,
+    )
+    table_header = ParagraphStyle(
+        "SolverTableHeader",
+        parent=table_cell,
+        fontName="Helvetica-Bold",
+        textColor=colors.white,
+    )
+
+    def prepare_table_rows(source_rows: list[list[Any]]) -> list[list[Any]]:
+        prepared = []
+        for row_index, row in enumerate(source_rows):
+            cell_style = table_header if row_index == 0 else table_cell
+            prepared.append(
+                [cell if hasattr(cell, "wrap") else Paragraph(str(cell), cell_style) for cell in row]
+            )
+        return prepared
 
     labels = {
         "pA": "P(A)",
         "pB": "P(B)",
-        "pAB": "P(A e B) usado no PL",
+        "pAB": "P(A e B) empirico (auditoria; nao fixado no PL)",
         "support": "Suporte da regra",
         "confidence": "Confianca da regra",
         "lift": "Lift",
@@ -1977,7 +2284,11 @@ def write_solver_comparison_report(result: dict[str, Any]) -> None:
             ]
         )
 
-    table = Table(rows, colWidths=[4.2 * cm, 2.8 * cm, 3.2 * cm, 2.7 * cm, 2.7 * cm])
+    table = Table(
+        prepare_table_rows(rows),
+        colWidths=[5.0 * cm, 2.6 * cm, 3.0 * cm, 2.5 * cm, 2.5 * cm],
+        repeatRows=1,
+    )
     table.setStyle(
         TableStyle(
             [
@@ -1995,7 +2306,11 @@ def write_solver_comparison_report(result: dict[str, Any]) -> None:
     catalog_rows = [["Solver", "Status no projeto", "Comparacao"]]
     for solver in result.get("solverCatalog", solver_catalog()):
         catalog_rows.append([solver["name"], solver["status"], solver["comparison"]])
-    catalog_table = Table(catalog_rows, colWidths=[3.9 * cm, 5.8 * cm, 6.0 * cm])
+    catalog_table = Table(
+        prepare_table_rows(catalog_rows),
+        colWidths=[3.4 * cm, 5.4 * cm, 6.8 * cm],
+        repeatRows=1,
+    )
     catalog_table.setStyle(
         TableStyle(
             [
@@ -2031,8 +2346,9 @@ def write_solver_comparison_report(result: dict[str, Any]) -> None:
             ]
         )
     engine_table = Table(
-        engine_rows,
-        colWidths=[3.0 * cm, 2.0 * cm, 1.6 * cm, 1.7 * cm, 1.4 * cm, 2.5 * cm, 1.6 * cm, 1.9 * cm],
+        prepare_table_rows(engine_rows),
+        colWidths=[2.7 * cm, 1.7 * cm, 1.4 * cm, 1.5 * cm, 1.2 * cm, 2.4 * cm, 1.5 * cm, 3.3 * cm],
+        repeatRows=1,
     )
     engine_table.setStyle(
         TableStyle(
@@ -2080,6 +2396,12 @@ def write_solver_comparison_report(result: dict[str, Any]) -> None:
             body,
         ),
         Paragraph(
+            "P(A e B) empirico aparece na tabela apenas para auditoria. A resposta especifica "
+            "da consulta nao e imposta como restricao do modelo; os limites sao inferidos a "
+            "partir das restricoes globais de marginais, pares e regras Apriori.",
+            body,
+        ),
+        Paragraph(
             "Nesta versao, o botao executa tres metodos reais do HiGHS no script separado: "
             "HiGHS automatico, HiGHS Dual Simplex e HiGHS Interior Point. Todos usam exatamente "
             "os mesmos parametros escolhidos pelo usuario na interface. Gurobi, lp_solve e "
@@ -2117,6 +2439,21 @@ def write_solver_comparison_report(result: dict[str, Any]) -> None:
             "ao solver independente usado para reproduzir a formulacao matematica da consulta.",
             body,
         ),
+        Paragraph("Solvers, selecao ativa e VoI do artigo", styles["Heading2"]),
+        Paragraph(
+            "HiGHS, HiGHS Dual Simplex e HiGHS Interior Point resolvem o programa linear "
+            "intervalar para minimizar e maximizar P(A | B). A selecao ativa e uma camada sobre "
+            "esse modelo: verifica restricoes nos extremos e chama novamente o HiGHS somente "
+            "para p_L ou p_U quando houver violacao. Ja o modulo que reproduz Ghosh e "
+            "Ramakrishnan (2019) nao e um quarto solver linear: ele calcula probabilidades nos "
+            "mundos, avalia entropia esperada e expande a arvore condicional de observacoes.",
+            body,
+        ),
+        Paragraph(
+            "Referencia: Ghosh, S.; Ramakrishnan, C. R. Value of Information in Probabilistic "
+            "Logic Programs. EPTCS 306, 2019, p. 71-84. DOI: 10.4204/EPTCS.306.14.",
+            body,
+        ),
     ]
 
     doc = SimpleDocTemplate(
@@ -2129,6 +2466,629 @@ def write_solver_comparison_report(result: dict[str, Any]) -> None:
         title="Relatorio Comparativo do Solver",
     )
     doc.build(story)
+
+
+def write_active_selection_report(
+    result: dict[str, Any],
+    output_path: Path = ACTIVE_SELECTION_REPORT_PATH,
+) -> None:
+    """Gera o relatorio principal da adaptacao proposta pelo professor."""
+
+    try:
+        from reportlab.lib import colors
+        from reportlab.lib.enums import TA_CENTER
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+        from reportlab.lib.units import cm
+        from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+    except Exception as error:
+        raise RuntimeError(f"ReportLab indisponivel para gerar PDF: {error}") from error
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    styles = getSampleStyleSheet()
+    title = ParagraphStyle(
+        "ActiveTitle",
+        parent=styles["Title"],
+        fontName="Helvetica-Bold",
+        fontSize=17,
+        leading=21,
+        alignment=TA_CENTER,
+        textColor=colors.HexColor("#12372f"),
+        spaceAfter=7,
+    )
+    subtitle = ParagraphStyle(
+        "ActiveSubtitle",
+        parent=styles["BodyText"],
+        fontSize=9.2,
+        leading=12.5,
+        alignment=TA_CENTER,
+        textColor=colors.HexColor("#52636e"),
+        spaceAfter=10,
+    )
+    body = ParagraphStyle(
+        "ActiveBody",
+        parent=styles["BodyText"],
+        fontSize=9,
+        leading=12.5,
+        spaceAfter=5,
+        textColor=colors.HexColor("#27343c"),
+    )
+    small = ParagraphStyle(
+        "ActiveSmall",
+        parent=body,
+        fontSize=7.4,
+        leading=9.3,
+        spaceAfter=0,
+    )
+    table_header = ParagraphStyle(
+        "ActiveTableHeader",
+        parent=small,
+        fontName="Helvetica-Bold",
+        textColor=colors.white,
+    )
+    equation = ParagraphStyle(
+        "ActiveEquation",
+        parent=styles["Code"],
+        fontName="Courier",
+        fontSize=7.6,
+        leading=9.6,
+        backColor=colors.HexColor("#eef4f5"),
+        borderColor=colors.HexColor("#cfd9df"),
+        borderWidth=0.5,
+        borderPadding=6,
+        spaceAfter=6,
+    )
+
+    def styled_table(
+        rows: list[list[Any]],
+        widths: list[float],
+        *,
+        font_size: float = 7.4,
+        header_color: str = "#176b5b",
+    ) -> Table:
+        prepared = []
+        for row_index, row in enumerate(rows):
+            cell_style = table_header if row_index == 0 else small
+            prepared.append(
+                [
+                    cell if hasattr(cell, "wrap") else Paragraph(str(cell), cell_style)
+                    for cell in row
+                ]
+            )
+        created = Table(prepared, colWidths=widths, repeatRows=1)
+        created.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor(header_color)),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                    ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#d9e2e7")),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("FONTSIZE", (0, 0), (-1, -1), font_size),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 5),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+                    ("TOPPADDING", (0, 0), (-1, -1), 3),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+                    ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f7faf9")]),
+                ]
+            )
+        )
+        return created
+
+    target = event_key([result["target"]])
+    conditions = event_key(result["conditions"])
+    base_model = result["baseModel"]
+    active = result["activeSelection"]
+    full = result["fullModel"]
+    baselines = result["baselines"]
+    effort = result["solverEffort"]
+    pool = result["candidatePool"]
+    experiment_path = ROOT / "experiments" / "results_active_selection.json"
+    experiment_aggregate: dict[str, Any] = {}
+    if experiment_path.exists():
+        try:
+            experiment_aggregate = json.loads(
+                experiment_path.read_text(encoding="utf-8")
+            ).get("aggregate", {})
+        except (OSError, json.JSONDecodeError):
+            experiment_aggregate = {}
+
+    mapping_rows = [
+        ["Conceito", "Artigo-base", "Adaptacao intervalar"],
+        ["Informacao", "Observavel e realizacao", "Restricao Apriori candidata"],
+        ["Consulta", "Proposicao ground q", f"P({target} | {conditions})"],
+        ["Incerteza", "Entropia da consulta", "Largura W = U - L"],
+        ["Utilidade", "Menos entropia esperada", "Menor intervalo da resposta"],
+        ["Custo", "Custo do observavel", "Uma unidade por restricao incluida"],
+        ["Politica", "Maior VoI no cenario", "Maior violacao de p_L ou p_U"],
+    ]
+    result_rows = [
+        ["Modelo", "Restricoes", "L", "U", "U - L"],
+        ["Base: marginais e pares", 0, f"{base_model['lower']:.6f}", f"{base_model['upper']:.6f}", f"{base_model['width']:.6f}"],
+        ["Selecao ativa", result["selectedCount"], f"{active['lower']:.6f}", f"{active['upper']:.6f}", f"{active['width']:.6f}"],
+        ["Suporte/confianca", baselines["supportConfidence"]["selectedCount"], f"{baselines['supportConfidence']['lower']:.6f}", f"{baselines['supportConfidence']['upper']:.6f}", f"{baselines['supportConfidence']['width']:.6f}"],
+        ["Aleatoria: media de 5", baselines["random"]["selectedCount"], "-", "-", f"{baselines['random']['meanWidth']:.6f}"],
+        ["Todas as relevantes", baselines["allCandidatePool"]["selectedCount"], f"{baselines['allCandidatePool']['lower']:.6f}", f"{baselines['allCandidatePool']['upper']:.6f}", f"{baselines['allCandidatePool']['width']:.6f}"],
+        ["Modelo completo atual", pool["availableAprioriConstraints"], f"{full['lower']:.6f}", f"{full['upper']:.6f}", f"{full['width']:.6f}"],
+    ]
+    effort_rows = [
+        ["Indicador", "Valor"],
+        ["Candidatas Apriori disponiveis", pool["availableAprioriConstraints"]],
+        ["Candidatas relevantes avaliadas", pool["evaluated"]],
+        ["Verificacoes algebricas dos extremos", effort["algebraicEndpointChecks"]],
+        ["Reotimizacoes seletivas executadas", effort["selectedEndpointLpSolves"]],
+        ["Podas exatas por factibilidade", effort["exactPruningSavedLpSolves"]],
+        ["Taxa de poda exata", f"{100 * effort['exactPruningRate']:.2f}%"],
+        ["Chamadas candidatas evitadas no total", effort["totalCandidateLpSolvesAvoided"]],
+        ["Taxa total de chamadas evitadas", f"{100 * effort['totalAvoidanceRate']:.2f}%"],
+        ["Subconjuntos da busca exaustiva", effort["fullSubsetSearchCount"]],
+        ["Tempo total", f"{result['durationSeconds']:.3f} s"],
+    ]
+    aggregate_rows = [
+        ["Indicador em multiplas consultas", "Resultado"],
+        ["Consultas avaliadas", experiment_aggregate.get("queries", "-")],
+        ["Largura media do modelo-base", f"{experiment_aggregate.get('meanBaseWidth', 0):.6f}"],
+        ["Largura media da selecao ativa", f"{experiment_aggregate.get('meanActiveWidth', 0):.6f}"],
+        ["Reducao relativa media", f"{100 * experiment_aggregate.get('meanActiveRelativeReduction', 0):.2f}%"],
+        ["Largura media por suporte/confianca", f"{experiment_aggregate.get('meanHeuristicWidth', 0):.6f}"],
+        ["Largura media aleatoria", f"{experiment_aggregate.get('meanRandomWidth', 0):.6f}"],
+        ["Vitorias sobre suporte/confianca", f"{experiment_aggregate.get('activeBeatsHeuristicQueries', 0)} de {experiment_aggregate.get('queries', 0)}"],
+        ["Vitorias sobre a media aleatoria", f"{experiment_aggregate.get('activeBeatsRandomMeanQueries', 0)} de {experiment_aggregate.get('queries', 0)}"],
+        ["Taxa media de poda exata", f"{100 * experiment_aggregate.get('meanExactPruningRate', 0):.2f}%"],
+        ["Taxa media total de chamadas evitadas", f"{100 * experiment_aggregate.get('meanTotalAvoidanceRate', 0):.2f}%"],
+    ]
+    trace_rows = [["Passo", "ID", "Restricao escolhida", "Viola p_L", "Viola p_U", "PLs", "U - L"]]
+    for item in active.get("selectionTrace", []):
+        trace_rows.append(
+            [
+                item["step"],
+                item["id"],
+                item["description"],
+                "sim" if item["violatesLowerExtreme"] else "nao",
+                "sim" if item["violatesUpperExtreme"] else "nao",
+                item["requiredLpSolves"],
+                f"{item['widthAfterSelection']:.6f}",
+            ]
+        )
+
+    story = [
+        Paragraph("Selecao Ativa de Restricoes em Logica Probabilistica Intervalar", title),
+        Paragraph(
+            "Adaptacao de Valor da Informacao ao projeto Probabilidades do Solo",
+            subtitle,
+        ),
+        Paragraph("1. Problema de pesquisa", styles["Heading2"]),
+        Paragraph(result["researchQuestion"], body),
+        Paragraph(
+            "Motivacao: programas em logica probabilistica representam conhecimento sem exigir "
+            "uma rede probabilistica predefinida. Essa flexibilidade cria muitas formulas e "
+            "restricoes; o problema passa a ser decidir quais informacoes realmente estreitam "
+            "a resposta da consulta atual.",
+            body,
+        ),
+        Paragraph("2. Relacao com o artigo-base", styles["Heading2"]),
+        Paragraph(
+            "Ghosh e Ramakrishnan (2019) definem Valor da Informacao para escolher observacoes "
+            "que aumentam a utilidade de uma consulta em um programa logico probabilistico. "
+            "O presente trabalho preserva a ideia de selecao orientada pela consulta, mas "
+            "adapta informacao, utilidade e custo ao modelo com respostas intervalares.",
+            body,
+        ),
+        styled_table(mapping_rows, [3.0 * cm, 5.4 * cm, 7.3 * cm]),
+        Spacer(1, 0.12 * cm),
+        Paragraph("3. Modelo matematico", styles["Heading2"]),
+        Paragraph(
+            "Se F e a regiao factivel das distribuicoes apos Charnes-Cooper, a consulta "
+            "q(z) possui limite inferior L(F), limite superior U(F) e largura W(F).",
+            body,
+        ),
+        Paragraph("L(F) = min_(z em F) q(z); U(F) = max_(z em F) q(z); W(F) = U(F) - L(F)", equation),
+        Paragraph("ganho(C | F) = W(F) - W(F intersecao C)", equation),
+        Paragraph(
+            "score(C) = max(0, max(A_C z_L), max(A_C z_U)); escolher C* = argmax score(C)",
+            equation,
+        ),
+        Paragraph("4. Poda exata", styles["Heading2"]),
+        Paragraph(result["pruningProof"], body),
+        Paragraph(
+            "Logo, a factibilidade e testada por multiplicacao matriz-vetor. O HiGHS e "
+            "chamado somente para o limite cujo extremo foi cortado pela nova restricao. "
+            "A exatidao refere-se a poda; a escolha da maior violacao continua gulosa.",
+            body,
+        ),
+        PageBreak(),
+        Paragraph("5. Experimento controlado", styles["Heading2"]),
+        Paragraph(
+            f"Consulta de referencia: P({target} | {conditions}). O modelo-base usa "
+            f"{base_model['constraintRecords']} registros de marginais e pares. O universo "
+            f"possui {pool['availableAprioriConstraints']} restricoes Apriori; o filtro de "
+            f"relevancia reteve {pool['evaluated']} candidatas e o orcamento foi "
+            f"{result['budget']} restricoes.",
+            body,
+        ),
+        styled_table(result_rows, [5.2 * cm, 2.2 * cm, 2.5 * cm, 2.5 * cm, 2.8 * cm]),
+        Spacer(1, 0.14 * cm),
+        Paragraph("6. Resultado", styles["Heading2"]),
+        Paragraph(
+            f"A selecao ativa reduziu a largura em {active['widthReduction']:.6f}, ou "
+            f"{100 * active['relativeWidthReduction']:.2f}%. Com apenas "
+            f"{result['selectedCount']} restricoes, recuperou "
+            f"{100 * result['recoveredFullModelReduction']:.2f}% da reducao observada no "
+            "modelo completo atual. Sob o mesmo orcamento, o baseline de suporte/confianca "
+            f"terminou com largura {baselines['supportConfidence']['width']:.6f}, e a media "
+            f"aleatoria terminou com {baselines['random']['meanWidth']:.6f}.",
+            body,
+        ),
+        Paragraph("7. Avaliacao em dez consultas", styles["Heading2"]),
+        Paragraph(
+            "Para evitar concluir a partir de um unico caso, o experimento repete o protocolo "
+            "em dez culturas sob as mesmas condicoes ph=acido e rainfall=alto, incluindo tres "
+            "consultas sem ocorrencia conjunta na amostra. O efeito nao e universal por consulta; "
+            "os resultados agregados sustentam a vantagem media da selecao ativa.",
+            body,
+        ),
+        styled_table(aggregate_rows, [9.0 * cm, 6.7 * cm]),
+        Spacer(1, 0.12 * cm),
+        Paragraph("8. Custo computacional", styles["Heading2"]),
+        styled_table(effort_rows, [8.2 * cm, 7.5 * cm], header_color="#8b5e16"),
+        Spacer(1, 0.12 * cm),
+        Paragraph(
+            "A busca nao enumera subconjuntos. Em cada passo, examina as restricoes restantes "
+            "com operacoes algebricas e resolve no maximo dois PLs, um por extremo violado. "
+            "Os baselines sao calculados apenas para avaliacao experimental.",
+            body,
+        ),
+        PageBreak(),
+        Paragraph("9. Rastro auditavel da selecao", styles["Heading2"]),
+        Paragraph(
+            "A tabela mostra a ordem gulosa, quais extremos foram violados e a largura apos "
+            "cada inclusao. Reducao nula em um passo pode ocorrer quando existe outra solucao "
+            "otima no mesmo extremo; restricoes sucessivas podem eliminar essa face otima.",
+            body,
+        ),
+        styled_table(
+            trace_rows,
+            [1.0 * cm, 1.5 * cm, 7.0 * cm, 1.5 * cm, 1.5 * cm, 1.0 * cm, 2.2 * cm],
+            font_size=6.8,
+        ),
+        Spacer(1, 0.15 * cm),
+        Paragraph("10. Validade e limites", styles["Heading2"]),
+        Paragraph(
+            result["limitations"]
+            + " Os intervalos e regras foram obtidos in-sample na mesma base agricola. "
+            "A evidencia apoia esta demonstracao controlada, nao uma afirmacao geral sobre "
+            "desempenho agronomico ou sobre todos os programas logico-probabilisticos.",
+            body,
+        ),
+        Paragraph("11. Conclusao", styles["Heading2"]),
+        Paragraph(
+            "Na consulta de referencia e na media do conjunto avaliado, a selecao orientada "
+            "pelos extremos produziu intervalo menor que os baselines sob o mesmo orcamento, "
+            "embora nao tenha vencido em todas as consultas. A poda reduziu substancialmente "
+            "as chamadas ao solver. A contribuicao e uma adaptacao aplicada; Valor da "
+            "Informacao e programacao linear probabilistica nao sao apresentados como tecnicas novas.",
+            body,
+        ),
+        Paragraph(
+            "<b>Referencia.</b> Ghosh, S.; Ramakrishnan, C. R. Value of Information in "
+            "Probabilistic Logic Programs. EPTCS 306, p. 71-84, 2019. "
+            "DOI: 10.4204/EPTCS.306.14. arXiv:1909.08234.",
+            small,
+        ),
+    ]
+
+    def footer(canvas: Any, document: Any) -> None:
+        canvas.saveState()
+        canvas.setFont("Helvetica", 8)
+        canvas.setFillColor(colors.HexColor("#60717c"))
+        canvas.drawString(1.8 * cm, 0.8 * cm, "Probabilidades do Solo - Selecao Ativa")
+        canvas.drawRightString(A4[0] - 1.8 * cm, 0.8 * cm, f"Pagina {document.page}")
+        canvas.restoreState()
+
+    doc = SimpleDocTemplate(
+        str(output_path),
+        pagesize=A4,
+        rightMargin=1.7 * cm,
+        leftMargin=1.7 * cm,
+        topMargin=1.5 * cm,
+        bottomMargin=1.4 * cm,
+        title="Selecao Ativa de Restricoes em Logica Probabilistica Intervalar",
+        author="Lissandra Kruse Fuganti",
+        subject="Adaptacao de Valor da Informacao com poda exata dos extremos",
+    )
+    doc.build(story, onFirstPage=footer, onLaterPages=footer)
+
+
+def write_voi_report(
+    result: dict[str, Any],
+    output_path: Path = VOI_REPORT_PATH,
+) -> None:
+    """Gera o relatorio explicativo do plano condicional baseado no artigo."""
+
+    try:
+        from reportlab.lib import colors
+        from reportlab.lib.enums import TA_CENTER
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+        from reportlab.lib.units import cm
+        from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+    except Exception as error:
+        raise RuntimeError(f"ReportLab indisponivel para gerar PDF: {error}") from error
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    styles = getSampleStyleSheet()
+    title = ParagraphStyle(
+        "VoiTitle",
+        parent=styles["Title"],
+        fontName="Helvetica-Bold",
+        fontSize=18,
+        leading=22,
+        alignment=TA_CENTER,
+        textColor=colors.HexColor("#12372f"),
+        spaceAfter=8,
+    )
+    subtitle = ParagraphStyle(
+        "VoiSubtitle",
+        parent=styles["BodyText"],
+        fontSize=10,
+        leading=14,
+        alignment=TA_CENTER,
+        textColor=colors.HexColor("#52636e"),
+        spaceAfter=12,
+    )
+    body = ParagraphStyle(
+        "VoiBody",
+        parent=styles["BodyText"],
+        fontSize=9.5,
+        leading=13.5,
+        spaceAfter=6,
+        textColor=colors.HexColor("#27343c"),
+    )
+    small = ParagraphStyle(
+        "VoiSmall",
+        parent=body,
+        fontSize=8,
+        leading=10.5,
+        spaceAfter=0,
+    )
+    table_header = ParagraphStyle(
+        "VoiTableHeader",
+        parent=small,
+        fontName="Helvetica-Bold",
+        textColor=colors.white,
+    )
+    equation = ParagraphStyle(
+        "VoiEquation",
+        parent=styles["Code"],
+        fontName="Courier",
+        fontSize=8.2,
+        leading=11,
+        backColor=colors.HexColor("#eef4f5"),
+        borderColor=colors.HexColor("#cfd9df"),
+        borderWidth=0.5,
+        borderPadding=7,
+        spaceAfter=8,
+    )
+
+    def paragraph_cell(value: Any, style: ParagraphStyle = small) -> Paragraph:
+        return Paragraph(str(value), style)
+
+    def styled_table(
+        rows: list[list[Any]],
+        widths: list[float],
+        *,
+        font_size: float = 8,
+    ) -> Table:
+        prepared = []
+        for row_index, row in enumerate(rows):
+            cell_style = table_header if row_index == 0 else small
+            prepared.append(
+                [cell if hasattr(cell, "wrap") else paragraph_cell(cell, cell_style) for cell in row]
+            )
+        created = Table(prepared, colWidths=widths, repeatRows=1)
+        created.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#176b5b")),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("FONTSIZE", (0, 0), (-1, -1), font_size),
+                    ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#d9e2e7")),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                    ("TOPPADDING", (0, 0), (-1, -1), 5),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+                    ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f7faf9")]),
+                ]
+            )
+        )
+        return created
+
+    def flatten_tree(node: dict[str, Any]) -> list[dict[str, Any]]:
+        nodes = [node]
+        for child in node.get("children", []):
+            nodes.extend(flatten_tree(child))
+        return nodes
+
+    def scenario_text(node: dict[str, Any]) -> str:
+        scenario = node.get("scenario") or []
+        return event_key(scenario) if scenario else "cenario inicial sem evidencia"
+
+    target = result["target"]
+    crop = target["value"]
+    root = result["tree"]
+    first_choice = (root.get("choice") or {}).get("observable", "nenhuma")
+    article = result.get("article", VOI_ARTICLE)
+    domain = result.get("domain", {})
+    summary = result["summary"]
+
+    mapping_rows = [
+        ["Elemento do artigo", "Instanciacao agricola"],
+        ["Teoria probabilistica T", f"Omega com {domain.get('worlds', '-')} mundos categoricos ponderados"],
+        ["Consulta ground q", f"recomendar({crop}) e uma proposicao binaria"],
+        ["Observavel", "Atributo mensuravel: N, P, K, temperatura, umidade, pH ou chuva"],
+        ["Realizacao", "Valor observado: baixo, medio, alto; ou acido, neutro, alcalino"],
+        ["Cenario S_s", "Teoria condicionada pelas medicoes ja realizadas"],
+        ["Custo e orcamento", "Unidades relativas configuradas na interface"],
+        ["Utilidade", "Negativo da entropia binaria da consulta"],
+        ["Plano", "Arvore em que a proxima medicao depende dos resultados anteriores"],
+    ]
+
+    metrics_rows = [
+        ["Metrica", "Valor"],
+        ["Consulta", f"recomendar({crop})"],
+        ["Probabilidade inicial", f"{result['initialQueryProbability']:.6f}"],
+        ["Entropia inicial", f"{result['initialEntropy']:.6f} bits"],
+        ["Entropia final esperada", f"{result['expectedFinalEntropy']:.6f} bits"],
+        ["VoI do plano", f"{result['planVoi']:.6f} bits"],
+        ["Primeira medicao", first_choice],
+        ["Orcamento", f"{result['budget']:.3f} unidades relativas"],
+        ["Nos / folhas / profundidade", f"{summary['nodes']} / {summary['leaves']} / {summary['maxDepth']}"],
+    ]
+
+    ranking_rows = [["#", "Observavel", "Custo", "VoI", "Entropia esperada"]]
+    for index, candidate in enumerate(root.get("ranking", []), start=1):
+        ranking_rows.append(
+            [
+                index,
+                candidate["observable"],
+                f"{candidate['cost']:.3f}",
+                f"{candidate['voi']:.6f}",
+                f"{candidate['expectedEntropy']:.6f}",
+            ]
+        )
+
+    plan_rows = [["No", "Cenario", "P(q)", "H(q)", "Orcamento", "Decisao"]]
+    stop_labels = {
+        "no_observables": "sem observaveis restantes",
+        "insufficient_budget": "orcamento insuficiente",
+        "no_utility_gain": "nenhum ganho de utilidade",
+        "node_limit": "limite de nos; plano parcial",
+    }
+    for node in flatten_tree(root):
+        choice = node.get("choice")
+        decision = (
+            f"medir {choice['observable']} (VoI={choice['voi']:.6f})"
+            if choice
+            else stop_labels.get(node.get("stopReason"), "fim do ramo")
+        )
+        plan_rows.append(
+            [
+                node["id"],
+                scenario_text(node),
+                f"{node['queryProbability']:.6f}",
+                f"{node['entropy']:.6f}",
+                f"{node['remainingBudget']:.3f}",
+                decision,
+            ]
+        )
+
+    story = [
+        Paragraph("Valor da Informacao em Logica Probabilistica Aplicado a Agricultura", title),
+        Paragraph(
+            f"Relatorio explicativo do projeto Probabilidades do Solo - consulta recomendar({crop})",
+            subtitle,
+        ),
+        Paragraph("1. Artigo-base e objetivo", styles["Heading2"]),
+        Paragraph(
+            f"A implementacao segue {article['title']}, de {', '.join(article['authors'])}, "
+            f"publicado em {article['venue']} ({article['year']}), DOI {article['doi']}. O objetivo "
+            "nao e afirmar que VoI e uma tecnica nova, mas demonstrar seu potencial para escolher "
+            "medicoes agricolas sob restricao de recursos.",
+            body,
+        ),
+        Paragraph("2. Correspondencia entre o artigo e o experimento", styles["Heading2"]),
+        styled_table(mapping_rows, [5.0 * cm, 10.7 * cm]),
+        Spacer(1, 0.15 * cm),
+        Paragraph("3. Modelo matematico", styles["Heading2"]),
+        Paragraph(
+            "A distribuicao dos mundos condicionada ao cenario s fornece P(q | s). A utilidade "
+            "adotada e a definicao de reducao de incerteza da Secao 3(a) do artigo.",
+            body,
+        ),
+        Paragraph("H(q | s) = - P(q | s) log2 P(q | s) - P(not q | s) log2 P(not q | s)", equation),
+        Paragraph("Utility(q, S_s) = - H(q | s)", equation),
+        Paragraph(
+            "VoI(O, q, S_b) = sum_o P(o | b) Utility(q, S_(b union o)) - Utility(q, S_b)",
+            equation,
+        ),
+        Paragraph(
+            "C_n = argmax VoI({C}, q, S_n), sujeito a cost(C) menor ou igual ao orcamento restante",
+            equation,
+        ),
+        Paragraph(
+            "O custo restringe quais observacoes podem ser escolhidas; o criterio da Figura 3 "
+            "maximiza o VoI, e nao a razao VoI/custo. Cada realizacao cria um filho na arvore, "
+            "e o proximo observavel e recalculado no novo cenario.",
+            body,
+        ),
+        Paragraph("4. Resultado da consulta", styles["Heading2"]),
+        styled_table(metrics_rows, [6.4 * cm, 9.3 * cm]),
+        Spacer(1, 0.18 * cm),
+        Paragraph("5. Ranking no cenario inicial", styles["Heading2"]),
+        styled_table(ranking_rows, [0.8 * cm, 4.0 * cm, 2.1 * cm, 3.0 * cm, 4.0 * cm]),
+        Spacer(1, 0.18 * cm),
+        Paragraph("6. Plano condicional completo", styles["Heading2"]),
+        Paragraph(
+            "A tabela registra todos os nos construidos. Ramos diferentes podem escolher "
+            "medicoes seguintes diferentes, que e a caracteristica central do planejamento condicional.",
+            body,
+        ),
+        styled_table(
+            plan_rows,
+            [0.7 * cm, 4.5 * cm, 2.0 * cm, 2.0 * cm, 1.8 * cm, 4.7 * cm],
+            font_size=7.2,
+        ),
+        Spacer(1, 0.18 * cm),
+        Paragraph("7. Solvers e responsabilidades", styles["Heading2"]),
+        Paragraph(
+            "O modelo linear intervalar do projeto continua separado: scipy.optimize.linprog "
+            "executa HiGHS, HiGHS Dual Simplex e HiGHS Interior Point para obter os limites de "
+            "P(A | B) apos Charnes-Cooper. O planejador de VoI nao chama esses solvers. Ele faz "
+            "inferencia exata sobre os mundos observados, calcula entropias e aplica a busca "
+            "gulosa em largura da Figura 3. Essa separacao evita atribuir ao artigo um metodo "
+            "de programacao linear que ele nao propoe.",
+            small,
+        ),
+        Paragraph("8. Interpretacao e limites", styles["Heading2"]),
+        Paragraph(result["interpretation"], small),
+        Paragraph(
+            "Os custos sao unidades relativas e os resultados constituem demonstracao controlada "
+            "in-sample. Antes de recomendar protocolos de campo, os custos devem ser calibrados "
+            "com valores reais e o plano precisa de validacao externa em dados independentes. "
+            "A busca gulosa e myopic e nao garante o melhor plano sob orcamento finito, exatamente "
+            "como discutido no artigo.",
+            small,
+        ),
+        Paragraph(
+            "<b>9. Referencia.</b> Ghosh, S.; Ramakrishnan, C. R. Value of Information in "
+            "Probabilistic Logic Programs. "
+            "Electronic Proceedings in Theoretical Computer Science, v. 306, p. 71-84, 2019. "
+            "DOI: 10.4204/EPTCS.306.14. arXiv:1909.08234.",
+            small,
+        ),
+    ]
+
+    def footer(canvas: Any, document: Any) -> None:
+        canvas.saveState()
+        canvas.setFont("Helvetica", 8)
+        canvas.setFillColor(colors.HexColor("#60717c"))
+        canvas.drawString(1.8 * cm, 0.8 * cm, "Probabilidades do Solo - Valor da Informacao")
+        canvas.drawRightString(A4[0] - 1.8 * cm, 0.8 * cm, f"Pagina {document.page}")
+        canvas.restoreState()
+
+    doc = SimpleDocTemplate(
+        str(output_path),
+        pagesize=A4,
+        rightMargin=1.7 * cm,
+        leftMargin=1.7 * cm,
+        topMargin=1.5 * cm,
+        bottomMargin=1.4 * cm,
+        title="Relatorio de Valor da Informacao na Agricultura",
+        author="Lissandra Kruse Fuganti",
+        subject="Adaptacao de Ghosh e Ramakrishnan (2019)",
+    )
+    doc.build(story, onFirstPage=footer, onLaterPages=footer)
 
 
 @app.post("/api/report/query")
@@ -2145,6 +3105,52 @@ def query_report():
             "ok": True,
             "reportUrl": "/reports/generated/relatorio_consulta_atual.pdf",
             "message": "Relatorio gerado com sucesso.",
+        }
+    )
+
+
+@app.post("/api/report/voi")
+def voi_report():
+    try:
+        result = compute_voi_plan(request.get_json(force=True))
+        write_voi_report(result)
+    except ValueError as error:
+        return jsonify({"ok": False, "error": str(error)}), 400
+    except RuntimeError as error:
+        return jsonify({"ok": False, "error": str(error)}), 500
+    except Exception as error:
+        return jsonify({"ok": False, "error": f"Erro ao gerar relatorio de VoI: {error}"}), 500
+    return jsonify(
+        {
+            "ok": True,
+            "reportUrl": "/reports/generated/relatorio_voi_agricultura.pdf",
+            "message": "Relatorio explicativo de VoI gerado com sucesso.",
+            "summary": result["summary"],
+            "planVoi": result["planVoi"],
+        }
+    )
+
+
+@app.post("/api/report/active-selection")
+def active_selection_report():
+    try:
+        result = compute_active_selection(request.get_json(force=True))
+        write_active_selection_report(result)
+    except ValueError as error:
+        return jsonify({"ok": False, "error": str(error)}), 400
+    except RuntimeError as error:
+        return jsonify({"ok": False, "error": str(error)}), 500
+    except Exception as error:
+        return jsonify({"ok": False, "error": f"Erro ao gerar relatorio da selecao ativa: {error}"}), 500
+    return jsonify(
+        {
+            "ok": True,
+            "reportUrl": "/reports/generated/relatorio_selecao_ativa.pdf",
+            "message": "Relatorio da selecao ativa gerado com sucesso.",
+            "selectedCount": result["selectedCount"],
+            "relativeWidthReduction": result["activeSelection"]["relativeWidthReduction"],
+            "exactPruningRate": result["solverEffort"]["exactPruningRate"],
+            "totalAvoidanceRate": result["solverEffort"]["totalAvoidanceRate"],
         }
     )
 

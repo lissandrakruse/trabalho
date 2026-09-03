@@ -197,11 +197,13 @@ label {
 }
 
 select,
+input,
 button {
   font: inherit;
 }
 
-select {
+select,
+input[type="number"] {
   width: 100%;
   height: 42px;
   border: 1px solid #c8d5dc;
@@ -209,6 +211,10 @@ select {
   background: #fbfcfd;
   color: #172027;
   padding: 0 10px;
+}
+
+input[type="checkbox"] {
+  accent-color: #176b5b;
 }
 
 .remove-condition {
@@ -495,6 +501,254 @@ select {
   gap: 8px;
 }
 
+.voi-panel {
+  grid-column: 1 / -1;
+}
+
+.active-selection-panel {
+  grid-column: 1 / -1;
+  border-color: #b8d8cf;
+}
+
+.active-introduction {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 16px;
+  padding: 14px;
+  border-left: 4px solid #8b5e16;
+  border-radius: 6px;
+  background: #fff8e8;
+  color: #3f392f;
+  line-height: 1.55;
+}
+
+.active-config-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.active-report-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.active-status {
+  margin-top: 12px;
+  color: #60717c;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.active-output-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+  gap: 16px;
+  margin-top: 18px;
+}
+
+.active-output-grid > section {
+  min-width: 0;
+}
+
+.active-output-grid h3 {
+  margin: 0 0 10px;
+  color: #17352f;
+  font-size: 15px;
+}
+
+.active-proof {
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid #dbe5e9;
+  border-radius: 8px;
+  background: #f7faf9;
+  color: #43535d;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.panel-subtitle {
+  max-width: 760px;
+  margin-top: 6px;
+  color: #60717c;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.article-link {
+  flex: 0 0 auto;
+  color: #0f5d4f;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.voi-introduction {
+  margin-bottom: 16px;
+  padding: 14px;
+  border-left: 4px solid #176b5b;
+  border-radius: 6px;
+  background: #eef9f6;
+  color: #27343c;
+  line-height: 1.55;
+}
+
+.voi-config-grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 12px;
+}
+
+.voi-observables {
+  margin-top: 16px;
+}
+
+.voi-observables h3,
+.voi-output-grid h3 {
+  margin: 0 0 10px;
+  color: #17352f;
+  font-size: 15px;
+}
+
+#voiObservableList {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.voi-observable-row {
+  grid-template-columns: auto 1fr 72px;
+  align-items: center;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid #dbe5e9;
+  border-radius: 8px;
+  background: #fbfcfd;
+}
+
+.voi-observable-row span {
+  min-width: 0;
+  color: #27343c;
+  overflow-wrap: anywhere;
+}
+
+.voi-observable-row small {
+  display: block;
+  margin-top: 3px;
+  color: #60717c;
+  font-weight: 400;
+}
+
+.voi-observable-row input[type="number"] {
+  height: 34px;
+  padding: 0 6px;
+}
+
+.voi-status {
+  margin-top: 12px;
+  color: #60717c;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.voi-report-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.voi-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.voi-metric {
+  padding: 12px;
+  border: 1px solid #cfe0dc;
+  border-radius: 8px;
+  background: #f4faf8;
+}
+
+.voi-metric span,
+.voi-metric strong {
+  display: block;
+}
+
+.voi-metric span {
+  color: #60717c;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.voi-metric strong {
+  margin-top: 5px;
+  color: #0f5d4f;
+  font-size: 21px;
+}
+
+.voi-output-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  gap: 16px;
+  margin-top: 18px;
+}
+
+.voi-output-grid > section {
+  min-width: 0;
+}
+
+.voi-table-wrap {
+  overflow-x: auto;
+}
+
+.voi-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.voi-table th,
+.voi-table td {
+  padding: 9px;
+  border-bottom: 1px solid #dbe5e9;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.voi-table th {
+  background: #eef4f5;
+  color: #17352f;
+}
+
+.voi-tree > ol,
+.voi-tree ol {
+  margin: 0;
+  padding-left: 22px;
+}
+
+.voi-tree-node {
+  margin: 0 0 8px;
+}
+
+.voi-node-card {
+  padding: 10px;
+  border: 1px solid #dbe5e9;
+  border-radius: 8px;
+  background: #fbfcfd;
+  color: #43535d;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.voi-node-card strong {
+  color: #17352f;
+}
+
 .panel:nth-of-type(4),
 .panel:nth-of-type(5),
 .panel:nth-of-type(6),
@@ -535,7 +789,15 @@ select {
 
   .tab-list,
   .math-model,
-  .solver-demo-grid {
+  .solver-demo-grid,
+  .active-config-grid,
+  .active-output-grid,
+  .active-report-actions,
+  .voi-config-grid,
+  .voi-metrics,
+  .voi-output-grid,
+  .voi-report-actions,
+  #voiObservableList {
     grid-template-columns: 1fr;
   }
 }

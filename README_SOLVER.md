@@ -8,6 +8,13 @@ recomendação de culturas. A implementação separa corretamente três papéis:
 3. suporte e confiança são transformados em restrições probabilísticas do
    programa linear.
 
+O projeto agora inclui uma camada de seleção ativa inspirada no artigo *Value
+of Information in Probabilistic Logic Programs* (Ghosh e Ramakrishnan, 2019).
+Ela seleciona restrições Apriori orientadas pela consulta, usa a redução da
+largura `U-L` como utilidade e reotimiza somente os extremos `p_L` ou `p_U` que
+forem violados. A formulação completa está em
+[`README_VOI.md`](README_VOI.md).
+
 `Lift` não é tratado como acurácia, qualidade de classificação, filtro ou
 coeficiente do programa linear. Ele permanece somente como medida descritiva da
 associação retornada pelo Apriori.
@@ -164,6 +171,24 @@ contagem zero que a completam. O TXT identifica cada mundo como observado ou
 completado. O digest impede que uma formulação diferente seja exportada
 silenciosamente: se os modelos divergirem, a geração falha.
 
+### 9. Seleção ativa de restrições
+
+O modelo-base usa marginais e conjuntas por pares. Suportes e confianças
+Apriori relevantes para os literais da consulta são tratados como candidatas.
+Em cada passo, o algoritmo escolhe a restrição mais violada pelos extremos
+atuais.
+
+Se `p_L` satisfaz a candidata, o limite inferior permanece exatamente igual e
+não é resolvido novamente. O mesmo vale para `p_U`. Assim, a checagem de todas
+as candidatas usa apenas multiplicação matriz-vetor e o HiGHS é chamado no
+máximo duas vezes por restrição efetivamente escolhida.
+
+Na consulta de referência, 25 de 52 candidatas relevantes reduzem a largura de
+`0,023265` para `0,019084`, superam os baselines sob o mesmo orçamento e evitam
+97,85% das chamadas candidatas no total. O experimento em dez consultas mostra
+redução relativa média de 41,31%, taxa média de poda exata de 66,29% e economia
+total média de 97,28% das chamadas candidatas.
+
 ## Interface do usuário
 
 A página permite:
@@ -175,7 +200,8 @@ A página permite:
 - identificar se `B -> A` foi realmente gerada pelo Apriori;
 - visualizar uma prévia das regras usadas no programa linear;
 - consultar o resumo didático e exportar o modelo numérico auditável em TXT;
-- gerar PDFs e comparação de solvers.
+- gerar PDFs e comparação de solvers;
+- executar a seleção ativa, comparar baselines e auditar cada restrição escolhida.
 
 Não há painel de acurácia, precisão, recall ou F1, porque o exercício modela
 restrições probabilísticas, não avaliação de um classificador.
@@ -196,6 +222,27 @@ python scripts/solve_query.py \
   --condition rainfall=alto
 ```
 
+Planejador de VoI independente da interface e dos solvers lineares:
+
+```bash
+python scripts/plan_voi.py --crop rice --budget 2
+```
+
+Seleção ativa de restrições:
+
+```bash
+python scripts/select_constraints.py \
+  --target label=rice \
+  --condition ph=acido \
+  --condition rainfall=alto \
+  --budget 25
+```
+
+Os três métodos HiGHS resolvem o programa linear intervalar. A seleção ativa
+usa o mesmo HiGHS apenas para atualizar extremos violados. O planejador de
+medições que reproduz o artigo usa enumeração dos mundos, inferência
+condicional, entropia e busca gulosa; ele não chama `linprog`.
+
 Consulta padrão:
 
 ```bash
@@ -213,6 +260,14 @@ python -m unittest discover -s tests -v
 - `app.py`: API Flask, formulação, solver, relatórios e interface;
 - `apriori_rules.py`: Ω ponderado, itemsets frequentes e regras Apriori;
 - `scripts/solve_query.py`: solver independente com a mesma formulação;
+- `active_selection.py`: seleção gulosa e poda exata dos extremos;
+- `scripts/select_constraints.py`: executor independente da seleção ativa;
+- `voi.py`: definições de utilidade, VoI, seleção de subconjunto e plano
+  condicional guloso;
+- `scripts/plan_voi.py`: planejador de VoI executável fora da interface;
+- `experiments/run_active_selection_experiment.py`: comparação em dez consultas;
+- `experiments/run_voi_experiment.py`: comparação controlada em 22 culturas;
+- `README_VOI.md`: modelo matemático, resultados e limites científicos;
 - `index.html`, `script.js`, `styles.css`: interface;
 - `data/Crop_recommendation.csv`: dataset.
 

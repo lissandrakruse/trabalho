@@ -1,0 +1,760 @@
+{
+  "experiment": "VoI agricola - demonstracao controlada",
+  "generatedAt": "2026-09-03T12:12:35.710494+00:00",
+  "article": {
+    "title": "Value of Information in Probabilistic Logic Programs",
+    "authors": [
+      "Sarthak Ghosh",
+      "C. R. Ramakrishnan"
+    ],
+    "year": 2019,
+    "venue": "EPTCS 306 / ICLP 2019",
+    "pages": "71-84",
+    "doi": "10.4204/EPTCS.306.14",
+    "url": "https://arxiv.org/abs/1909.08234"
+  },
+  "dataset": {
+    "name": "Crop Recommendation",
+    "records": 2200,
+    "observedWorlds": 466,
+    "crops": 22,
+    "observables": [
+      "N",
+      "P",
+      "K",
+      "temperature",
+      "humidity",
+      "ph",
+      "rainfall"
+    ]
+  },
+  "design": {
+    "query": "label=cultura (ground e binaria)",
+    "utility": "negativo da entropia binaria",
+    "budget": 2,
+    "costPerObservable": 1.0,
+    "methods": [
+      "plano condicional guloso da Figura 3",
+      "melhor subconjunto estatico por busca exaustiva",
+      "media de todos os subconjuntos estaticos (expectativa aleatoria)",
+      "subconjunto estatico por heuristica de confianca"
+    ],
+    "scope": "demonstracao in-sample; nao e validacao agronomica externa"
+  },
+  "aggregate": {
+    "meanInitialEntropy": 0.26676498780302604,
+    "meanGreedyConditionalVoi": 0.15809455177599854,
+    "meanBestStaticVoi": 0.16108762577753033,
+    "meanRandomStaticVoi": 0.09459576200076568,
+    "meanConfidenceStaticVoi": 0.1221381628232525,
+    "meanGreedyGainOverRandom": 0.06349878977523288,
+    "greedyAtLeastRandomCrops": 22,
+    "totalCrops": 22
+  },
+  "results": [
+    {
+      "crop": "apple",
+      "initialProbability": 0.045454545454545456,
+      "initialEntropy": 0.26676498780302604,
+      "greedyConditional": {
+        "firstObservable": "P",
+        "expectedFinalEntropy": 0.059656780291085204,
+        "voi": 0.20710820751194084,
+        "nodes": 7
+      },
+      "exhaustiveBestStatic": {
+        "observables": [
+          "P",
+          "humidity"
+        ],
+        "expectedFinalEntropy": 0.059656780291085204,
+        "voi": 0.20710820751194084
+      },
+      "randomStaticMean": {
+        "subsetCount": 21,
+        "voi": 0.10302039374301708
+      },
+      "confidenceHeuristicStatic": {
+        "observables": [
+          "P",
+          "K"
+        ],
+        "expectedFinalEntropy": 0.15081532656905072,
+        "voi": 0.11594966123397532
+      },
+      "greedyGainOverRandom": 0.10408781376892376
+    },
+    {
+      "crop": "banana",
+      "initialProbability": 0.045454545454545456,
+      "initialEntropy": 0.26676498780302604,
+      "greedyConditional": {
+        "firstObservable": "P",
+        "expectedFinalEntropy": 0.008895021736470703,
+        "voi": 0.2578699660665553,
+        "nodes": 7
+      },
+      "exhaustiveBestStatic": {
+        "observables": [
+          "N",
+          "P"
+        ],
+        "expectedFinalEntropy": 0.008895021736470705,
+        "voi": 0.2578699660665553
+      },
+      "randomStaticMean": {
+        "subsetCount": 21,
+        "voi": 0.11100951594769864
+      },
+      "confidenceHeuristicStatic": {
+        "observables": [
+          "P",
+          "K"
+        ],
+        "expectedFinalEntropy": 0.15081532656905072,
+        "voi": 0.11594966123397532
+      },
+      "greedyGainOverRandom": 0.14686045011885668
+    },
+    {
+      "crop": "blackgram",
+      "initialProbability": 0.045454545454545456,
+      "initialEntropy": 0.26676498780302604,
+      "greedyConditional": {
+        "firstObservable": "K",
+        "expectedFinalEntropy": 0.17043410666156356,
+        "voi": 0.09633088114146249,
+        "nodes": 10
+      },
+      "exhaustiveBestStatic": {
+        "observables": [
+          "P",
+          "K"
+        ],
+        "expectedFinalEntropy": 0.17298176456082381,
+        "voi": 0.09378322324220223
+      },
+      "randomStaticMean": {
+        "subsetCount": 21,
+        "voi": 0.07048671887463072
+      },
+      "confidenceHeuristicStatic": {
+        "observables": [
+          "K",
+          "N"
+        ],
+        "expectedFinalEntropy": 0.18345685910055948,
+        "voi": 0.08330812870246657
+      },
+      "greedyGainOverRandom": 0.02584416226683177
+    },
+    {
+      "crop": "chickpea",
+      "initialProbability": 0.045454545454545456,
+      "initialEntropy": 0.26676498780302604,
+      "greedyConditional": {
+        "firstObservable": "K",
+        "expectedFinalEntropy": 0.0,
+        "voi": 0.26676498780302604,
+        "nodes": 7
+      },
+      "exhaustiveBestStatic": {
+        "observables": [
+          "K",
+          "humidity"
+        ],
+        "expectedFinalEntropy": 0.0,
+        "voi": 0.26676498780302604
+      },
+      "randomStaticMean": {
+        "subsetCount": 21,
+        "voi": 0.11439037985127569
+      },
+      "confidenceHeuristicStatic": {
+        "observables": [
+          "ph",
+          "K"
+        ],
+        "expectedFinalEntropy": 0.12350933820913712,
+        "voi": 0.14325564959388892
+      },
+      "greedyGainOverRandom": 0.15237460795175034
+    },
+    {
+      "crop": "coconut",
+      "initialProbability": 0.045454545454545456,
+      "initialEntropy": 0.26676498780302604,
+      "greedyConditional": {
+        "firstObservable": "K",
+        "expectedFinalEntropy": 0.09979927042627633,
+        "voi": 0.1669657173767497,
+        "nodes": 7
+      },
+      "exhaustiveBestStatic": {
+        "observables": [
+          "K",
+          "humidity"
+        ],
+        "expectedFinalEntropy": 0.09979927042627634,
+        "voi": 0.1669657173767497
+      },
+      "randomStaticMean": {
+        "subsetCount": 21,
+        "voi": 0.10288780445315793
+      },
+      "confidenceHeuristicStatic": {
+        "observables": [
+          "K",
+          "humidity"
+        ],
+        "expectedFinalEntropy": 0.09979927042627634,
+        "voi": 0.1669657173767497
+      },
+      "greedyGainOverRandom": 0.06407791292359177
+    },
+    {
+      "crop": "coffee",
+      "initialProbability": 0.045454545454545456,
+      "initialEntropy": 0.26676498780302604,
+      "greedyConditional": {
+        "firstObservable": "K",
+        "expectedFinalEntropy": 0.11486177262536068,
+        "voi": 0.15190321517766536,
+        "nodes": 7
+      },
+      "exhaustiveBestStatic": {
+        "observables": [
+          "N",
+          "humidity"
+        ],
+        "expectedFinalEntropy": 0.09783054446117923,
+        "voi": 0.16893444334184682
+      },
+      "randomStaticMean": {
+        "subsetCount": 21,
+        "voi": 0.10334916985554903
+      },
+      "confidenceHeuristicStatic": {
+        "observables": [
+          "K",
+          "N"
+        ],
+        "expectedFinalEntropy": 0.11486177262536068,
+        "voi": 0.15190321517766536
+      },
+      "greedyGainOverRandom": 0.04855404532211634
+    },
+    {
+      "crop": "cotton",
+      "initialProbability": 0.045454545454545456,
+      "initialEntropy": 0.26676498780302604,
+      "greedyConditional": {
+        "firstObservable": "N",
+        "expectedFinalEntropy": 0.10681997755552435,
+        "voi": 0.15994501024750168,
+        "nodes": 7
+      },
+      "exhaustiveBestStatic": {
+        "observables": [
+          "N",
+          "K"
+        ],
+        "expectedFinalEntropy": 0.10681997755552435,
+        "voi": 0.15994501024750168
+      },
+      "randomStaticMean": {
+        "subsetCount": 21,
+        "voi": 0.09124788891468764
+      },
+      "confidenceHeuristicStatic": {
+        "observables": [
+          "N",
+          "humidity"
+        ],
+        "expectedFinalEntropy": 0.15413612178909214,
+        "voi": 0.1126288660139339
+      },
+      "greedyGainOverRandom": 0.06869712133281404
+    },
+    {
+      "crop": "grapes",
+      "initialProbability": 0.045454545454545456,
+      "initialEntropy": 0.26676498780302604,
+      "greedyConditional": {
+        "firstObservable": "P",
+        "expectedFinalEntropy": 0.11670824231038297,
+        "voi": 0.15005674549264308,
+        "nodes": 7
+      },
+      "exhaustiveBestStatic": {
+        "observables": [
+          "K",
+          "humidity"
+        ],
+        "expectedFinalEntropy": 0.11360068964906715,
+        "voi": 0.15316429815395888
+      },
+      "randomStaticMean": {
+        "subsetCount": 21,
+        "voi": 0.08905050403202462
+      },
+      "confidenceHeuristicStatic": {
+        "observables": [
+          "P",
+          "K"
+        ],
+        "expectedFinalEntropy": 0.15081532656905072,
+        "voi": 0.11594966123397532
+      },
+      "greedyGainOverRandom": 0.06100624146061846
+    },
+    {
+      "crop": "jute",
+      "initialProbability": 0.045454545454545456,
+      "initialEntropy": 0.26676498780302604,
+      "greedyConditional": {
+        "firstObservable": "rainfall",
+        "expectedFinalEntropy": 0.13745153582677463,
+        "voi": 0.1293134519762514,
+        "nodes": 7
+      },
+      "exhaustiveBestStatic": {
+        "observables": [
+          "P",
+          "rainfall"
+        ],
+        "expectedFinalEntropy": 0.13745153582677463,
+        "voi": 0.1293134519762514
+      },
+      "randomStaticMean": {
+        "subsetCount": 21,
+        "voi": 0.08895721513305464
+      },
+      "confidenceHeuristicStatic": {
+        "observables": [
+          "rainfall",
+          "K"
+        ],
+        "expectedFinalEntropy": 0.16698002367210468,
+        "voi": 0.09978496413092136
+      },
+      "greedyGainOverRandom": 0.040356236843196766
+    },
+    {
+      "crop": "kidneybeans",
+      "initialProbability": 0.045454545454545456,
+      "initialEntropy": 0.26676498780302604,
+      "greedyConditional": {
+        "firstObservable": "ph",
+        "expectedFinalEntropy": 0.11996185065570343,
+        "voi": 0.14680313714732263,
+        "nodes": 7
+      },
+      "exhaustiveBestStatic": {
+        "observables": [
+          "humidity",
+          "ph"
+        ],
+        "expectedFinalEntropy": 0.11996185065570343,
+        "voi": 0.14680313714732263
+      },
+      "randomStaticMean": {
+        "subsetCount": 21,
+        "voi": 0.09096629069894921
+      },
+      "confidenceHeuristicStatic": {
+        "observables": [
+          "ph",
+          "humidity"
+        ],
+        "expectedFinalEntropy": 0.11996185065570343,
+        "voi": 0.14680313714732263
+      },
+      "greedyGainOverRandom": 0.05583684644837342
+    },
+    {
+      "crop": "lentil",
+      "initialProbability": 0.045454545454545456,
+      "initialEntropy": 0.26676498780302604,
+      "greedyConditional": {
+        "firstObservable": "rainfall",
+        "expectedFinalEntropy": 0.15049212346699278,
+        "voi": 0.11627286433603326,
+        "nodes": 7
+      },
+      "exhaustiveBestStatic": {
+        "observables": [
+          "P",
+          "rainfall"
+        ],
+        "expectedFinalEntropy": 0.15049212346699278,
+        "voi": 0.11627286433603326
+      },
+      "randomStaticMean": {
+        "subsetCount": 21,
+        "voi": 0.06830425694861232
+      },
+      "confidenceHeuristicStatic": {
+        "observables": [
+          "rainfall",
+          "K"
+        ],
+        "expectedFinalEntropy": 0.15254465708922482,
+        "voi": 0.11422033071380122
+      },
+      "greedyGainOverRandom": 0.04796860738742094
+    },
+    {
+      "crop": "maize",
+      "initialProbability": 0.045454545454545456,
+      "initialEntropy": 0.26676498780302604,
+      "greedyConditional": {
+        "firstObservable": "P",
+        "expectedFinalEntropy": 0.16477463819278293,
+        "voi": 0.10199034961024311,
+        "nodes": 10
+      },
+      "exhaustiveBestStatic": {
+        "observables": [
+          "N",
+          "K"
+        ],
+        "expectedFinalEntropy": 0.15488034863009367,
+        "voi": 0.11188463917293237
+      },
+      "randomStaticMean": {
+        "subsetCount": 21,
+        "voi": 0.06880892352979762
+      },
+      "confidenceHeuristicStatic": {
+        "observables": [
+          "P",
+          "K"
+        ],
+        "expectedFinalEntropy": 0.18592836747602945,
+        "voi": 0.0808366203269966
+      },
+      "greedyGainOverRandom": 0.0331814260804455
+    },
+    {
+      "crop": "mango",
+      "initialProbability": 0.045454545454545456,
+      "initialEntropy": 0.26676498780302604,
+      "greedyConditional": {
+        "firstObservable": "K",
+        "expectedFinalEntropy": 0.09444454189191821,
+        "voi": 0.17232044591110784,
+        "nodes": 7
+      },
+      "exhaustiveBestStatic": {
+        "observables": [
+          "K",
+          "rainfall"
+        ],
+        "expectedFinalEntropy": 0.09444454189191823,
+        "voi": 0.17232044591110782
+      },
+      "randomStaticMean": {
+        "subsetCount": 21,
+        "voi": 0.11374949233129472
+      },
+      "confidenceHeuristicStatic": {
+        "observables": [
+          "K",
+          "rainfall"
+        ],
+        "expectedFinalEntropy": 0.09444454189191823,
+        "voi": 0.17232044591110782
+      },
+      "greedyGainOverRandom": 0.05857095357981312
+    },
+    {
+      "crop": "mothbeans",
+      "initialProbability": 0.045454545454545456,
+      "initialEntropy": 0.26676498780302604,
+      "greedyConditional": {
+        "firstObservable": "humidity",
+        "expectedFinalEntropy": 0.12770973699033594,
+        "voi": 0.1390552508126901,
+        "nodes": 7
+      },
+      "exhaustiveBestStatic": {
+        "observables": [
+          "humidity",
+          "rainfall"
+        ],
+        "expectedFinalEntropy": 0.12770973699033594,
+        "voi": 0.1390552508126901
+      },
+      "randomStaticMean": {
+        "subsetCount": 21,
+        "voi": 0.09269953246275202
+      },
+      "confidenceHeuristicStatic": {
+        "observables": [
+          "ph",
+          "humidity"
+        ],
+        "expectedFinalEntropy": 0.16573415808637043,
+        "voi": 0.10103082971665561
+      },
+      "greedyGainOverRandom": 0.04635571834993808
+    },
+    {
+      "crop": "mungbean",
+      "initialProbability": 0.045454545454545456,
+      "initialEntropy": 0.26676498780302604,
+      "greedyConditional": {
+        "firstObservable": "rainfall",
+        "expectedFinalEntropy": 0.14628565137906735,
+        "voi": 0.1204793364239587,
+        "nodes": 7
+      },
+      "exhaustiveBestStatic": {
+        "observables": [
+          "P",
+          "rainfall"
+        ],
+        "expectedFinalEntropy": 0.14628565137906735,
+        "voi": 0.1204793364239587
+      },
+      "randomStaticMean": {
+        "subsetCount": 21,
+        "voi": 0.08619936688409534
+      },
+      "confidenceHeuristicStatic": {
+        "observables": [
+          "rainfall",
+          "P"
+        ],
+        "expectedFinalEntropy": 0.14628565137906735,
+        "voi": 0.1204793364239587
+      },
+      "greedyGainOverRandom": 0.034279969539863356
+    },
+    {
+      "crop": "muskmelon",
+      "initialProbability": 0.045454545454545456,
+      "initialEntropy": 0.26676498780302604,
+      "greedyConditional": {
+        "firstObservable": "K",
+        "expectedFinalEntropy": 0.09572097667040083,
+        "voi": 0.1710440111326252,
+        "nodes": 7
+      },
+      "exhaustiveBestStatic": {
+        "observables": [
+          "N",
+          "humidity"
+        ],
+        "expectedFinalEntropy": 0.07781227283802908,
+        "voi": 0.18895271496499697
+      },
+      "randomStaticMean": {
+        "subsetCount": 21,
+        "voi": 0.127492288116474
+      },
+      "confidenceHeuristicStatic": {
+        "observables": [
+          "K",
+          "N"
+        ],
+        "expectedFinalEntropy": 0.12959147097103077,
+        "voi": 0.13717351683199527
+      },
+      "greedyGainOverRandom": 0.043551723016151206
+    },
+    {
+      "crop": "orange",
+      "initialProbability": 0.045454545454545456,
+      "initialEntropy": 0.26676498780302604,
+      "greedyConditional": {
+        "firstObservable": "humidity",
+        "expectedFinalEntropy": 0.061152399591362094,
+        "voi": 0.20561258821166395,
+        "nodes": 7
+      },
+      "exhaustiveBestStatic": {
+        "observables": [
+          "P",
+          "K"
+        ],
+        "expectedFinalEntropy": 0.054925854363331056,
+        "voi": 0.211839133439695
+      },
+      "randomStaticMean": {
+        "subsetCount": 21,
+        "voi": 0.09604469618478506
+      },
+      "confidenceHeuristicStatic": {
+        "observables": [
+          "ph",
+          "humidity"
+        ],
+        "expectedFinalEntropy": 0.144211178321478,
+        "voi": 0.12255380948154804
+      },
+      "greedyGainOverRandom": 0.10956789202687889
+    },
+    {
+      "crop": "papaya",
+      "initialProbability": 0.045454545454545456,
+      "initialEntropy": 0.26676498780302604,
+      "greedyConditional": {
+        "firstObservable": "K",
+        "expectedFinalEntropy": 0.13141057466061226,
+        "voi": 0.13535441314241378,
+        "nodes": 7
+      },
+      "exhaustiveBestStatic": {
+        "observables": [
+          "P",
+          "humidity"
+        ],
+        "expectedFinalEntropy": 0.11497044632963194,
+        "voi": 0.1517945414733941
+      },
+      "randomStaticMean": {
+        "subsetCount": 21,
+        "voi": 0.0935424081715871
+      },
+      "confidenceHeuristicStatic": {
+        "observables": [
+          "K",
+          "humidity"
+        ],
+        "expectedFinalEntropy": 0.1403325375201006,
+        "voi": 0.12643245028292543
+      },
+      "greedyGainOverRandom": 0.04181200497082668
+    },
+    {
+      "crop": "pigeonpeas",
+      "initialProbability": 0.045454545454545456,
+      "initialEntropy": 0.26676498780302604,
+      "greedyConditional": {
+        "firstObservable": "humidity",
+        "expectedFinalEntropy": 0.15401581386719648,
+        "voi": 0.11274917393582956,
+        "nodes": 10
+      },
+      "exhaustiveBestStatic": {
+        "observables": [
+          "humidity",
+          "rainfall"
+        ],
+        "expectedFinalEntropy": 0.15622897571380687,
+        "voi": 0.11053601208921918
+      },
+      "randomStaticMean": {
+        "subsetCount": 21,
+        "voi": 0.0673220784350209
+      },
+      "confidenceHeuristicStatic": {
+        "observables": [
+          "humidity",
+          "rainfall"
+        ],
+        "expectedFinalEntropy": 0.15622897571380687,
+        "voi": 0.11053601208921918
+      },
+      "greedyGainOverRandom": 0.04542709550080866
+    },
+    {
+      "crop": "pomegranate",
+      "initialProbability": 0.045454545454545456,
+      "initialEntropy": 0.26676498780302604,
+      "greedyConditional": {
+        "firstObservable": "humidity",
+        "expectedFinalEntropy": 0.12585116390177037,
+        "voi": 0.14091382390125567,
+        "nodes": 7
+      },
+      "exhaustiveBestStatic": {
+        "observables": [
+          "K",
+          "humidity"
+        ],
+        "expectedFinalEntropy": 0.12585116390177037,
+        "voi": 0.14091382390125567
+      },
+      "randomStaticMean": {
+        "subsetCount": 21,
+        "voi": 0.09314467525457931
+      },
+      "confidenceHeuristicStatic": {
+        "observables": [
+          "humidity",
+          "P"
+        ],
+        "expectedFinalEntropy": 0.15826283046937537,
+        "voi": 0.10850215733365068
+      },
+      "greedyGainOverRandom": 0.04776914864667636
+    },
+    {
+      "crop": "rice",
+      "initialProbability": 0.045454545454545456,
+      "initialEntropy": 0.26676498780302604,
+      "greedyConditional": {
+        "firstObservable": "rainfall",
+        "expectedFinalEntropy": 0.10858243722262287,
+        "voi": 0.15818255058040318,
+        "nodes": 7
+      },
+      "exhaustiveBestStatic": {
+        "observables": [
+          "humidity",
+          "rainfall"
+        ],
+        "expectedFinalEntropy": 0.10858243722262287,
+        "voi": 0.15818255058040318
+      },
+      "randomStaticMean": {
+        "subsetCount": 21,
+        "voi": 0.08923624932508845
+      },
+      "confidenceHeuristicStatic": {
+        "observables": [
+          "rainfall",
+          "K"
+        ],
+        "expectedFinalEntropy": 0.16348309348019927,
+        "voi": 0.10328189432282678
+      },
+      "greedyGainOverRandom": 0.06894630125531473
+    },
+    {
+      "crop": "watermelon",
+      "initialProbability": 0.045454545454545456,
+      "initialEntropy": 0.26676498780302604,
+      "greedyConditional": {
+        "firstObservable": "K",
+        "expectedFinalEntropy": 0.09572097667040083,
+        "voi": 0.1710440111326252,
+        "nodes": 7
+      },
+      "exhaustiveBestStatic": {
+        "observables": [
+          "P",
+          "K"
+        ],
+        "expectedFinalEntropy": 0.09572097667040082,
+        "voi": 0.17104401113262524
+      },
+      "randomStaticMean": {
+        "subsetCount": 21,
+        "voi": 0.11919691486871298
+      },
+      "confidenceHeuristicStatic": {
+        "observables": [
+          "K",
+          "N"
+        ],
+        "expectedFinalEntropy": 0.12959147097103077,
+        "voi": 0.13717351683199527
+      },
+      "greedyGainOverRandom": 0.051847096263912235
+    }
+  ]
+}
